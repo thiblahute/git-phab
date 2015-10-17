@@ -1,0 +1,352 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# git-phab - git subcommand to integrate with phabricator
+#
+# Copyright (C) 2008  Owen Taylor
+# Copyright (C) 2015  Xavier Claessens <xavier.claessens@collabora.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, If not, see
+# http://www.gnu.org/licenses/.
+
+import subprocess
+import argparse
+import git
+import os
+import re
+import sys
+import json
+
+
+repo = git.Repo(os.getcwd())
+
+
+# Copied from git-bz
+def die(message):
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+# Copied from git-bz
+def prompt(message):
+    try:
+        while True:
+            # Using print here could result in Python adding a stray space
+            # before the next print
+            sys.stdout.write(message + " [yn] ")
+            sys.stdout.flush()
+            line = sys.stdin.readline().strip()
+            if line == 'y' or line == 'Y':
+                return True
+            elif line == 'n' or line == 'N':
+                return False
+    except KeyboardInterrupt:
+        # Ctrl+C doesn’t cause a newline
+        sys.stdout.write("\n")
+        return False
+
+
+def get_commits(commit_or_revision_range):
+    try:
+        # See if the argument identifies a single revision
+        commits = [repo.rev_parse(commit_or_revision_range)]
+    except:
+        # If not, assume the argument is a range
+        try:
+            commits = list(repo.iter_commits(commit_or_revision_range))
+        except:
+            # If not again, the argument must be invalid — perhaps the user has
+            # accidentally specified a bug number but not a revision.
+            commits = []
+
+    if len(commits) == 0:
+        die(("'%s' does not name any commits. Use HEAD to specify just the "
+             "last commit") % commit_or_revision_range)
+
+    return commits
+
+
+def get_differential_link(commit):
+    m = re.search('(^Differential Revision: )(.*)$',
+                  commit.message, re.MULTILINE)
+    return None if m is None else m.group(2)
+
+
+def format_commit(commit):
+    link = get_differential_link(commit)
+    d = "N/A" if link is None else link[link.rfind('/') + 1:]
+    return u"%s %s — %s" % (commit.hexsha[:7], d, commit.summary)
+
+
+def print_commit(commit):
+    print(format_commit(commit))
+
+
+def conduit(cmd, args):
+    output = subprocess.check_output('arc call-conduit ' + cmd,
+                                     input=bytes(json.dumps(args), 'utf-8'),
+                                     shell=True)
+    return json.loads(output.decode('utf-8'))
+
+
+def get_wip_branch(args, fetch=False):
+    remote = args.remote
+    branch = "wip/phab/" + args.task
+
+    if fetch and not remote:
+        try:
+            reply = conduit('maniphest.query', {
+                "ids": [int(args.task[1:])]
+            })
+            props = list(reply['response'].values())[0]
+            uri = props['auxiliary']['std:maniphest:git:uri-branch']
+            remote, branch = uri.split('#')
+            print("Git URI: %s, branch: %s" % (remote, branch))
+        except:
+            print("Couldn't get git URI from Maniphest")
+
+    if not remote:
+        remote = repo.config_reader().get_value('phab', 'remote')
+
+    return branch, remote
+
+
+def validate_args(args):
+    if args.task and not re.fullmatch('T[0-9]+', args.task):
+        die(("Task '%s' is not in the correct format. "
+             "Expecting 'T123'." % args.task))
+
+
+def parse_commit_msg(msg):
+    subject = None
+    body = []
+    fields = []
+
+    for line in msg.split('\n'):
+        if not subject:
+            subject = line
+        elif line.startswith('Differential Revision: '):
+            fields.append(line)
+        else:
+            body.append(line)
+
+    return subject, body, fields
+
+
+def do_attach(args):
+    if repo.is_dirty():
+        die("Repository is dirty. Aborting.")
+
+    validate_args(args)
+
+    # Oldest commit is last in the list
+    commits = get_commits(args.revision_range)
+    all_commits = list(repo.iter_commits(commits[-1].hexsha + "^..HEAD"))
+
+    # Sanity checks
+    for c in commits:
+        if c not in all_commits:
+            die("'%s' is not in current tree. Aborting." % c.hexsha)
+        if len(c.parents) > 1:
+            die("'%s' is a merge commit. Aborting." % c.hexsha)
+
+    # Try to guess the task from branch name
+    if not args.task:
+        name = str(repo.head.reference)
+        m = re.search('(^T[0-9]+)($|-.*)', name)
+        if m is not None:
+            args.task = m.group(1)
+
+    # Ask confirmation before doing any harm
+    for c in commits:
+        print_commit(c)
+    if not prompt("Attach above commits?" if not args.task else
+                  "Attach above commits to task %s?" % args.task):
+        print("Aborting")
+        sys.exit(0)
+
+    orig_commit = repo.head.commit
+    orig_branch = repo.head.reference
+
+    options = ['--allow-untracked',
+               '--config history.immutable=false',
+               '--verbatim']
+    if args.reviewers:
+        options.append('--reviewers ' + args.reviewers)
+    if args.message:
+        options.append('--message ' + args.message)
+    arc_cmd = 'arc diff %s HEAD~1' % (' '.join(options))
+
+    summary = ""
+
+    try:
+        # Detach HEAD from the branch; this gives a cleaner reflog for the
+        # branch
+        print("Moving to starting point")
+        repo.head.reference = commits[-1].parents[0]
+        repo.head.reset(index=True, working_tree=True)
+
+        last_revision_id = None
+        for commit in reversed(all_commits):
+            repo.git.cherry_pick(commit.hexsha)
+
+            if commit in commits:
+                # Add extra info in the commit msg. It is important that
+                # phabricator fields are last, after all common git fields like
+                # 'Reviewed-by:', etc. Note that "Depends on" is not a field
+                # and is parsed from the body part.
+                subject, body, fields = parse_commit_msg(commit.message)
+                if last_revision_id:
+                    body.append("Depends on %s" % last_revision_id)
+                if args.task:
+                    fields.append("Maniphest Tasks: %s" % args.task)
+
+                msg = '\n\n'.join([subject,
+                                   '\n'.join(body),
+                                   '\n'.join(fields)])
+
+                repo.head.commit = repo.head.commit.parents[0]
+                repo.head.commit = repo.index.commit(msg)
+
+                print("attach " + commit.hexsha)
+                try:
+                    subprocess.check_call(arc_cmd, shell=True)
+                except:
+                    print("Command '%s' failed. Continuing." % arc_cmd)
+                    summary += "Failed: %s\n" % format_commit(commit)
+                    repo.head.commit = commit
+                    continue
+
+                # arc diff modified our commit message. Re-commit it with the
+                # original message, adding only the "Differential Revision:"
+                # line.
+                msg = commit.message
+                orig_link = get_differential_link(commit)
+                new_link = get_differential_link(repo.head.commit)
+                if orig_link is None and new_link is not None:
+                    msg = msg + '\nDifferential Revision: ' + new_link
+                    summary += "New: "
+                else:
+                    summary += "Updated: "
+
+                repo.head.commit = repo.head.commit.parents[0]
+                repo.head.commit = repo.index.commit(msg)
+                last_revision_id = new_link.split("/")[-1]
+
+                summary += format_commit(repo.head.commit) + "\n"
+            else:
+                print("pick " + commit.hexsha)
+                summary += "Picked: %s\n" % format_commit(commit)
+
+        if orig_branch is not None:
+            orig_branch.commit = repo.head.commit
+            repo.head.reference = orig_branch
+    except:
+        print("Cleaning up back to original state on error")
+        repo.head.commit = orig_commit
+        if orig_branch is not None:
+            orig_branch.commit = orig_commit
+            repo.head.reference = orig_branch
+        repo.head.reset(index=True, working_tree=True)
+        raise
+
+    if args.task:
+        try:
+            branch, remote_name = get_wip_branch(args)
+            remote = repo.remote(remote_name)
+            if prompt('Push HEAD to %s/%s?' % (remote, branch)):
+                remote.push('HEAD:refs/heads/' + branch, force=True)
+                summary += "Branch pushed to %s/%s\n" % (remote, branch)
+
+            try:
+                uri = "%s#%s" % (remote.config_reader.get('url'), branch)
+                conduit('maniphest.update', {
+                    "id": int(args.task[1:]),
+                    "auxiliary": {
+                        "std:maniphest:git:uri-branch": uri
+                    }
+                })
+            except:
+                print("Failed to set std:maniphest:git:uri-branch")
+
+        except:
+            summary += "Failed: push wip branch\n"
+
+    print("\n\nSummary:")
+    print(summary)
+
+
+def do_log(args):
+    commits = get_commits(args.revision_range)
+    for c in commits:
+        print_commit(c)
+
+
+def do_fetch(args):
+    validate_args(args)
+
+    branch, remote = get_wip_branch(args, fetch=True)
+    if not remote:
+        die("No remote location defined. Aborting.")
+
+    repo.git.fetch(remote, "%s:%s" % (branch, args.task), force=True)
+    print("Branch %s created." % args.task)
+
+
+parser = argparse.ArgumentParser(description='Phabricator integration.')
+subparsers = parser.add_subparsers()
+
+attach_parser = subparsers.add_parser(
+    'attach', help="Generate a Differential for each commit")
+attach_parser.add_argument(
+    '--reviewers', '-r', metavar='<username1,username2,...>',
+    help="A list of reviewers")
+attach_parser.add_argument(
+    '--message', '-m', metavar='<message>',
+    help=("When updating a revision, use the specified message instead of "
+          "prompting"))
+attach_parser.add_argument(
+    '--task', '-t', metavar='<T123>',
+    help=("Set the task this Differential refers to"))
+attach_parser.add_argument(
+    '--remote', metavar='<remote>',
+    help=("A remote repository to push to. "
+          "Overrides 'phab.remote' configuration."))
+attach_parser.add_argument(
+    'revision_range', metavar='<revision range>',
+    nargs='?', default='origin/master..',
+    help="commit or revision range to attach (Default: 'origin/master..')")
+attach_parser.set_defaults(func=do_attach)
+
+log_parser = subparsers.add_parser(
+    'log', help="Show commit logs with their differential ID")
+log_parser.add_argument(
+    'revision_range', metavar='<revision range>',
+    nargs='?', default='origin/master..',
+    help="commit or revision range to show (Default: 'origin/master..')")
+log_parser.set_defaults(func=do_log)
+
+fetch_parser = subparsers.add_parser(
+    'fetch', help="Fetch a task's branch")
+fetch_parser.add_argument(
+    '--remote', metavar='<remote>',
+    help=("A remote repository to fetch from. "
+          "Overrides 'phab.remote' configuration."))
+fetch_parser.add_argument(
+    'task', metavar='<T123>',
+    help="The task to fetch")
+fetch_parser.set_defaults(func=do_fetch)
+
+args = parser.parse_args()
+args.func(args)
