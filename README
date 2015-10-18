@@ -15,27 +15,27 @@ DESCRIPTION
 
 Git subcommand to integrate with phabricator.
 
-The 'attach' command creates a new differential for each commit in the provided
+The `attach` command creates a new differential for each commit in the provided
 range. Commit messages will be rewritten to include the URL of the newly created
 Differential (no other information will be added to the message). If a commit
 message already contains the URL of a Differential it will be updated instead of
 creating a new one.
 
-The 'attach' command can also push the current HEAD as a new branch on a remote
-repository. The branch will be named 'wip/phab/T123' when the '--task T123'
-argument is given or if current branch's name is in the form "T123" or
-"T123-description". Note that the remote URI should always be readable by anyone
+The `attach` command can also push the current HEAD as a new branch on a remote
+repository. The branch will be named `wip/phab/T123` when the `--task T123`
+argument is given or if current branch's name is in the form `T123` or
+`T123-description`. Note that the remote URI should always be readable by anyone
 so you might want to set it up like:
 
   git remote add publish git://foo
   git remote set-url --push publish git+ssh://foo
   git config phab.remote publish
 
-The 'fetch' command pulls the branch referenced by a task.
+The `fetch` command pulls the branch referenced by a task.
 
 Notes:
- - Repository must be clean, use 'git stash' if needed.
- - Range must not contain merge commits, use 'git rebase' if needed.
+ - Repository must be clean, use `git stash` if needed.
+ - Range must not contain merge commits, use `git rebase` if needed.
  - Range must be contained in the current branch, but can stop before HEAD. In
    that case commits after the end of your range will be cherry-picked after
    attaching commits to Differential.
@@ -44,29 +44,37 @@ Notes:
    attach next commits. So it will never leave your repository in unconsistent
    state. Failed commits will be shown in a summary at the end of the process
    and can then be attached separately after being fixed with for example
-   'git commit --amend' or 'git rebase -i'.
+   `git commit --amend` or `git rebase -i`.
  - Only one branch can be associated per task.
 
 Examples:
-  # Attach all commits since origin/master
-  git phab attach
+===========
 
-  # Attach only the top commit
-  git phab attach HEAD
+Attach all commits since origin/master
 
-  # Attach all commits since origin/master, excluding top commit
-  git phab attach origin/master..HEAD^
+  $ git phab attach
 
-  # Attach top 3 patches, link them to a task, and set reviewers
-  git phab attach --reviewers xclaesse,smcv --task T123 HEAD~3..
+Attach only the top commit
 
-  # Push current branch to origin/wip/phab/T123
-  git config phab.remote origin
-  git phab attach --task T123
+  $ git phab attach HEAD
 
-  # Fetch a branch associated with the task T123
-  git phab fetch T123
+Attach all commits since origin/master, excluding top commit
 
-The 'log' command shows the list of commits in a range together with their
-Differential link if any. The range definition is the same as for 'attach'
+  $ git phab attach origin/master..HEAD^
+
+Attach top 3 patches, link them to a task, and set reviewers
+
+  $ git phab attach --reviewers xclaesse,smcv --task T123 HEAD~3..
+
+Push current branch to origin/wip/phab/T123
+
+  $ git config phab.remote origin
+  $ git phab attach --task T123
+
+Fetch a branch associated with the task T123
+
+  $ git phab fetch T123
+
+The `log` command shows the list of commits in a range together with their
+Differential link if any. The range definition is the same as for `attach`
 command, and is thus useful to know what attach would do.
