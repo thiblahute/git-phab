@@ -1,0 +1,6 @@
+{
+    "phabricator.uri" : "https://phabricator.freedesktop.org/",
+    "project": "git-phab",
+    "repository.callsign": "GITPHAB"
+}
+
