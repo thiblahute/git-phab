@@ -185,7 +185,7 @@ def do_attach(args):
     if args.reviewers:
         options.append('--reviewers ' + args.reviewers)
     if args.message:
-        options.append('--message ' + args.message)
+        options.append('--message "' + args.message + '"')
     arc_cmd = 'arc diff %s HEAD~1' % (' '.join(options))
 
     summary = ""
