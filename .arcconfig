@@ -1,5 +1,6 @@
 {
     "phabricator.uri" : "https://phabricator.freedesktop.org/",
+    "lint.engine": "ArcanistConfigurationDrivenLintEngine",
     "project": "git-phab",
     "repository.callsign": "GITPHAB"
 }
