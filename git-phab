@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import json
+from urllib.parse import urlsplit, urlunsplit
 
 
 repo = git.Repo(os.getcwd())
@@ -116,9 +117,6 @@ def get_wip_branch(args, fetch=False):
         except:
             print("Couldn't get git URI from Maniphest")
 
-    if not remote:
-        remote = repo.config_reader().get_value('phab', 'remote')
-
     return branch, remote
 
 
@@ -126,6 +124,50 @@ def validate_args(args):
     # Ensure that common args are always defined
     if not hasattr(args, 'task'):
         args.task = None
+    if not hasattr(args, 'remote'):
+        args.remote = None
+
+    # Ensure user has setup git-phab before first usage
+    try:
+        config_remote = repo.config_reader().get_value('phab', 'remote')
+    except:
+        die("** Please configure git-phab before first usage.\n\n"
+            " - Set the remote to be used to push your branches for review "
+            "(e.g. 'origin').\n"
+            "       git config phab.remote <remote>\n")
+
+    if not args.remote:
+        args.remote = config_remote
+
+    # Validate that args.remote exists
+    try:
+        remote = repo.remote(args.remote)
+    except:
+        die("%s not a valid remote. Aborting." % args.remote)
+
+    # Make sure the user knows what he's doing if the remote's fetch URL is
+    # using ssh, otherwise reviewers might not be able to pull their branch.
+    url = urlsplit(remote.config_reader.get('url'))
+    if url.scheme in ["ssh", "git+ssh"]:
+        try:
+            force_ssh = \
+                repo.config_reader().get_value('phab', 'force-ssh-remote')
+        except:
+            force_ssh = False
+
+        if not force_ssh:
+            if prompt("The configured phab.remote (%s) is using ssh.\n"
+                      "It means it might not be readable by some people.\n"
+                      "Are you sure you want to continue?" % args.remote):
+                repo.config_writer().set_value('phab', 'force-ssh-remote',
+                                               True)
+            else:
+                pushurl = urlunsplit(url)
+                fetchurl = urlunsplit(url._replace(scheme='git'))
+                die("To reconfigure your remote, run:\n"
+                    "  git remote set-url {0} {1}\n"
+                    "  git remote set-url --push {0} {2}"
+                    .format(args.remote, fetchurl, pushurl))
 
     # Try to guess the task from branch name
     if not args.task:
