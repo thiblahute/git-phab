@@ -280,8 +280,8 @@ def do_attach(args):
             except:
                 print("Failed to set std:maniphest:git:uri-branch")
 
-        except:
-            summary += "Failed: push wip branch\n"
+        except Exception as e:
+            summary += "Failed: push wip branch: %s\n" % e
 
     print("\n\nSummary:")
     print(summary)
