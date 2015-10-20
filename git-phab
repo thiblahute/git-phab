@@ -123,6 +123,17 @@ def get_wip_branch(args, fetch=False):
 
 
 def validate_args(args):
+    # Ensure that common args are always defined
+    if not hasattr(args, 'task'):
+        args.task = None
+
+    # Try to guess the task from branch name
+    if not args.task:
+        m = re.search('(^T[0-9]+)($|-.*)', str(repo.head.reference))
+        if m is not None:
+            args.task = m.group(1)
+
+    # Validate the args.task is in the right format
     if args.task and not re.fullmatch('T[0-9]+', args.task):
         die(("Task '%s' is not in the correct format. "
              "Expecting 'T123'." % args.task))
@@ -148,8 +159,6 @@ def do_attach(args):
     if repo.is_dirty():
         die("Repository is dirty. Aborting.")
 
-    validate_args(args)
-
     # Oldest commit is last in the list
     commits = get_commits(args.revision_range)
     all_commits = list(repo.iter_commits(commits[-1].hexsha + "^..HEAD"))
@@ -160,13 +169,6 @@ def do_attach(args):
             die("'%s' is not in current tree. Aborting." % c.hexsha)
         if len(c.parents) > 1:
             die("'%s' is a merge commit. Aborting." % c.hexsha)
-
-    # Try to guess the task from branch name
-    if not args.task:
-        name = str(repo.head.reference)
-        m = re.search('(^T[0-9]+)($|-.*)', name)
-        if m is not None:
-            args.task = m.group(1)
 
     # Ask confirmation before doing any harm
     for c in commits:
@@ -294,8 +296,6 @@ def do_log(args):
 
 
 def do_fetch(args):
-    validate_args(args)
-
     branch, remote = get_wip_branch(args, fetch=True)
     if not remote:
         die("No remote location defined. Aborting.")
@@ -349,4 +349,5 @@ fetch_parser.add_argument(
 fetch_parser.set_defaults(func=do_fetch)
 
 args = parser.parse_args()
+validate_args(args)
 args.func(args)
