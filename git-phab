@@ -101,23 +101,8 @@ def conduit(cmd, args):
     return json.loads(output.decode('utf-8'))
 
 
-def get_wip_branch(args, fetch=False):
-    remote = args.remote
-    branch = "wip/phab/" + args.task
-
-    if fetch and not remote:
-        try:
-            reply = conduit('maniphest.query', {
-                "ids": [int(args.task[1:])]
-            })
-            props = list(reply['response'].values())[0]
-            uri = props['auxiliary']['std:maniphest:git:uri-branch']
-            remote, branch = uri.split('#')
-            print("Git URI: %s, branch: %s" % (remote, branch))
-        except:
-            print("Couldn't get git URI from Maniphest")
-
-    return branch, remote
+def get_wip_branch(args):
+    return "wip/phab/" + args.task
 
 
 def validate_args(args):
@@ -136,8 +121,10 @@ def validate_args(args):
             "(e.g. 'origin').\n"
             "       git config phab.remote <remote>\n")
 
+    args.remote_from_config = False
     if not args.remote:
         args.remote = config_remote
+        args.remote_from_config = True
 
     # Validate that args.remote exists
     try:
@@ -307,8 +294,8 @@ def do_attach(args):
 
     if args.task:
         try:
-            branch, remote_name = get_wip_branch(args)
-            remote = repo.remote(remote_name)
+            branch = get_wip_branch(args)
+            remote = repo.remote(args.remote)
             if prompt('Push HEAD to %s/%s?' % (remote, branch)):
                 remote.push('HEAD:refs/heads/' + branch, force=True)
                 summary += "Branch pushed to %s/%s\n" % (remote, branch)
@@ -338,10 +325,21 @@ def do_log(args):
 
 
 def do_fetch(args):
-    branch, remote = get_wip_branch(args, fetch=True)
-    if not remote:
-        die("No remote location defined. Aborting.")
+    branch = get_wip_branch(args)
+    remote = args.remote
 
+    if args.remote_from_config:
+        try:
+            reply = conduit('maniphest.query', {
+                "ids": [int(args.task[1:])]
+            })
+            props = list(reply['response'].values())[0]
+            uri = props['auxiliary']['std:maniphest:git:uri-branch']
+            remote, branch = uri.split('#')
+        except:
+            print("Couldn't get git URI from Maniphest")
+
+    print("Git URI: %s, branch: %s" % (remote, branch))
     repo.git.fetch(remote, "%s:%s" % (branch, args.task), force=True)
     print("Branch %s created." % args.task)
 
