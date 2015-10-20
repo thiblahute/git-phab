@@ -101,6 +101,17 @@ def conduit(cmd, args):
     return json.loads(output.decode('utf-8'))
 
 
+def get_arcconfig(args):
+    if hasattr(args, 'arcconfig'):
+        return args.arcconfig
+
+    path = os.path.join(repo.working_tree_dir, '.arcconfig')
+    with open(path) as f:
+        args.arcconfig = json.load(f)
+
+    return args.arcconfig
+
+
 def get_wip_branch(args):
     return "wip/phab/" + args.task
 
@@ -344,6 +355,41 @@ def do_fetch(args):
     print("Branch %s created." % args.task)
 
 
+def do_browse(args):
+    urls = []
+    if not args.objects:
+        if not args.task:
+            die("Could not figure out a task from branch name")
+        args.objects = [task]
+
+    for obj in args.objects:
+        if re.fullmatch('T[0-9]+', obj) or re.fullmatch('D[0-9]+', obj):
+            try:
+                urls.append(get_arcconfig(args)["phabricator.uri"] + "/" + obj)
+                continue
+            except:
+                die("Could not find phabricator.uri in .arcconfig.\n"
+                    "Make sure the current repository is proporly configured "
+                    "for phabricator")
+
+        try:
+            commit = repo.rev_parse(obj)
+        except git.BadName:
+            die("Wrong commit hash: %s" % obj)
+
+        uri = get_differential_link(commit)
+        if not uri:
+            print("Could not find a differential for %s" % obj)
+            continue
+        urls.append(uri)
+
+    for url in urls:
+        print("Openning: %s" % url)
+        subprocess.check_call(["xdg-open", url],
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+
+
 parser = argparse.ArgumentParser(description='Phabricator integration.')
 subparsers = parser.add_subparsers()
 
@@ -387,6 +433,15 @@ fetch_parser.add_argument(
     'task', metavar='<T123>',
     help="The task to fetch")
 fetch_parser.set_defaults(func=do_fetch)
+
+browse_parser = subparsers.add_parser(
+    'browse', help="Open the task of the current "
+    "branch in web browser")
+browse_parser.add_argument(
+    'objects', nargs='*', default=[],
+    help="The 'objects' to browse, it can either be a task ID."
+    " A revision ID or a commit hash.",)
+browse_parser.set_defaults(func=do_browse)
 
 args = parser.parse_args()
 validate_args(args)
