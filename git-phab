@@ -20,6 +20,7 @@
 # along with this program; if not, If not, see
 # http://www.gnu.org/licenses/.
 
+import tempfile
 import subprocess
 import argparse
 import git
@@ -64,6 +65,31 @@ def prompt(message):
         # Ctrl+C doesn’t cause a newline
         sys.stdout.write("\n")
         return False
+
+
+# Copied from git-bz
+def edit_file(filename):
+    editor = repo.git.var("GIT_EDITOR")
+    process = subprocess.Popen(editor + " " + filename, shell=True)
+    process.wait()
+    if process.returncode != 0:
+        die("Editor exited with non-zero return code")
+
+
+# Copied from git-bz
+def edit_template(template):
+    # Prompts the user to edit the text 'template' and returns list of
+    # lines with comments stripped
+
+    handle, filename = tempfile.mkstemp(".txt", "git-phab-")
+    f = os.fdopen(handle, "w")
+    f.write(template)
+    f.close()
+
+    edit_file(filename)
+
+    return [l for l in open(filename, "r").readlines()
+            if not l.startswith("#")]
 
 
 def get_commits(commit_or_revision_range):
@@ -189,6 +215,51 @@ def parse_commit_msg(msg):
     return subject, body, fields
 
 
+def get_arcconfig():
+    farcconf = os.path.join(repo.git.rev_parse("--show-toplevel"),
+                            ".arcconfig")
+
+    try:
+        return json.load(open(farcconf))
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+
+
+def create_task():
+    arcconf = get_arcconfig()
+    project = None
+    if arcconf:
+        try:
+            project = arcconf["project"]
+        except KeyError:
+            pass
+
+    while not project:
+        project = input("Could not find any project for which "
+                        "to create the task please specify one:")
+
+    reply = conduit("project.query", {"names": [project]})
+    phids = [phid for phid in reply["response"]["data"].keys()]
+
+    task_infos = None
+    while not task_infos:
+        task_infos = edit_template("# Merge branch: %s\n\n"
+                                   "# Please enter a task title for the "
+                                   "merge request" % repo.active_branch.name)
+
+    description = ""
+    title = task_infos[0].replace("\n", "")
+    if len(title) > 1:
+        for s in title[1:]:
+            description += s
+
+    return conduit("maniphest.createtask", {"title": title,
+                                            "projectPHIDs": phids,
+                                            "description": description})
+
+
 def do_attach(args):
     if args.repo.is_dirty():
         die("Repository is dirty. Aborting.")
@@ -207,6 +278,14 @@ def do_attach(args):
     # Ask confirmation before doing any harm
     for c in commits:
         print_commit(c)
+
+    if not args.task:
+        if prompt("Create a task for above commits?"):
+            try:
+                args.task = create_task()["response"]["objectName"]
+            except KeyError:
+                die("Could not create task.")
+
     if not prompt("Attach above commits?" if not args.task else
                   "Attach above commits to task %s?" % args.task):
         print("Aborting")
