@@ -40,6 +40,13 @@ class GitPhab:
         with open(path) as f:
             self.arcconfig = json.load(f)
 
+        try:
+            self.phabricator_uri = self.arcconfig["phabricator.uri"]
+        except KeyError:
+            die("Could not find 'phabricator.uri' in .arcconfig.\n"
+                "Make sure the current repository is properly configured "
+                "for phabricator")
+
 
 # Copied from git-bz
 def die(message):
@@ -357,14 +364,8 @@ def do_browse(args):
         args.objects = [task]
 
     for obj in args.objects:
-        if re.fullmatch('T[0-9]+', obj) or re.fullmatch('D[0-9]+', obj):
-            try:
-                urls.append(args.arcconfig["phabricator.uri"] + "/" + obj)
-                continue
-            except:
-                die("Could not find phabricator.uri in .arcconfig.\n"
-                    "Make sure the current repository is proporly configured "
-                    "for phabricator")
+        if re.fullmatch('(T|D)[0-9]+', obj):
+            urls.append(args.phabricator_uri + "/" + obj)
 
         try:
             commit = args.repo.rev_parse(obj)
