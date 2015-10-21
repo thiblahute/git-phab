@@ -98,9 +98,13 @@ class GitPhab:
         if len(task_infos) > 1:
             description = '\n'.join(task_infos[1:])
 
-        return conduit("maniphest.createtask", {"title": title,
-                                                "projectPHIDs": phids,
-                                                "description": description})
+        reply = conduit("maniphest.createtask", {
+            "title": title,
+            "description": description
+            "projectPHIDs": [self.project_phid],
+        })
+
+        return reply
 
 
 # Copied from git-bz
