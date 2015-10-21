@@ -8,6 +8,7 @@ REQUIREMENTS
 ============
 
  - pip3 install GitPython
+ - python3-argcomplete
  - arcanist
 
 DESCRIPTION

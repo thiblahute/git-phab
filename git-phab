@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# PYTHON_ARGCOMPLETE_OK
 #
 # git-phab - git subcommand to integrate with phabricator
 #
@@ -23,6 +24,7 @@
 import tempfile
 import subprocess
 import argparse
+import argcomplete
 import git
 import os
 import re
@@ -446,6 +448,10 @@ def do_browse(args):
                               stderr=subprocess.DEVNULL)
 
 
+def DisabledCompleter(prefix, **kwargs):
+    return []
+
+
 parser = argparse.ArgumentParser(description='Phabricator integration.')
 subparsers = parser.add_subparsers()
 
@@ -453,22 +459,27 @@ attach_parser = subparsers.add_parser(
     'attach', help="Generate a Differential for each commit")
 attach_parser.add_argument(
     '--reviewers', '-r', metavar='<username1,username2,...>',
-    help="A list of reviewers")
+    help="A list of reviewers") \
+    .completer = DisabledCompleter
 attach_parser.add_argument(
     '--message', '-m', metavar='<message>',
     help=("When updating a revision, use the specified message instead of "
-          "prompting"))
+          "prompting")) \
+    .completer = DisabledCompleter
 attach_parser.add_argument(
     '--task', '-t', metavar='<T123>',
-    help=("Set the task this Differential refers to"))
+    help=("Set the task this Differential refers to")) \
+    .completer = DisabledCompleter
 attach_parser.add_argument(
     '--remote', metavar='<remote>',
     help=("A remote repository to push to. "
-          "Overrides 'phab.remote' configuration."))
+          "Overrides 'phab.remote' configuration.")) \
+    .completer = DisabledCompleter
 attach_parser.add_argument(
     'revision_range', metavar='<revision range>',
     nargs='?', default='origin/master..',
-    help="commit or revision range to attach (Default: 'origin/master..')")
+    help="commit or revision range to attach (Default: 'origin/master..')") \
+    .completer = DisabledCompleter
 attach_parser.set_defaults(func=do_attach)
 
 log_parser = subparsers.add_parser(
@@ -476,7 +487,8 @@ log_parser = subparsers.add_parser(
 log_parser.add_argument(
     'revision_range', metavar='<revision range>',
     nargs='?', default='origin/master..',
-    help="commit or revision range to show (Default: 'origin/master..')")
+    help="commit or revision range to show (Default: 'origin/master..')") \
+    .completer = DisabledCompleter
 log_parser.set_defaults(func=do_log)
 
 fetch_parser = subparsers.add_parser(
@@ -484,10 +496,12 @@ fetch_parser = subparsers.add_parser(
 fetch_parser.add_argument(
     '--remote', metavar='<remote>',
     help=("A remote repository to fetch from. "
-          "Overrides 'phab.remote' configuration."))
+          "Overrides 'phab.remote' configuration.")) \
+    .completer = DisabledCompleter
 fetch_parser.add_argument(
     'task', metavar='<T123>',
-    help="The task to fetch")
+    help="The task to fetch") \
+    .completer = DisabledCompleter
 fetch_parser.set_defaults(func=do_fetch)
 
 browse_parser = subparsers.add_parser(
@@ -495,11 +509,13 @@ browse_parser = subparsers.add_parser(
     "branch in web browser")
 browse_parser.add_argument(
     'objects', nargs='*', default=[],
-    help="The 'objects' to browse, it can either be a task ID."
-    " A revision ID or a commit hash.",)
+    help="The 'objects' to browse. It can either be a task ID, "
+    "a revision ID, a commit hash or empty to open current branch's task.") \
+    .completer = DisabledCompleter
 browse_parser.set_defaults(func=do_browse)
 
 obj = GitPhab()
+argcomplete.autocomplete(parser)
 args = parser.parse_args(namespace=obj)
 validate_args(args)
 args.func(args)
