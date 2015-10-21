@@ -20,6 +20,7 @@
 # along with this program; if not, If not, see
 # http://www.gnu.org/licenses/.
 
+import tempfile
 import subprocess
 import argparse
 import git
@@ -42,10 +43,57 @@ class GitPhab:
 
         try:
             self.phabricator_uri = self.arcconfig["phabricator.uri"]
-        except KeyError:
-            die("Could not find 'phabricator.uri' in .arcconfig.\n"
+            self.project = self.arcconfig["project"]
+        except KeyError as e:
+            die("Could not find '%s' in .arcconfig.\n"
                 "Make sure the current repository is properly configured "
-                "for phabricator")
+                "for phabricator" % e.args[0])
+
+    # Copied from git-bz
+    def edit_file(self, filename):
+        editor = self.repo.git.var("GIT_EDITOR")
+        process = subprocess.Popen(editor + " " + filename, shell=True)
+        process.wait()
+        if process.returncode != 0:
+            die("Editor exited with non-zero return code")
+
+    # Copied from git-bz
+    def edit_template(self, template):
+        # Prompts the user to edit the text 'template' and returns list of
+        # lines with comments stripped
+
+        handle, filename = tempfile.mkstemp(".txt", "git-phab-")
+        f = os.fdopen(handle, "w")
+        f.write(template)
+        f.close()
+
+        self.edit_file(filename)
+
+        with open(filename, 'r') as f:
+            return [l for l in f.readlines() if not l.startswith("#")]
+
+    def create_task(self):
+        reply = conduit("project.query", {"names": [self.project]})
+        phids = [phid for phid in reply["response"]["data"].keys()]
+        if len(phids) != 1:
+            die("Couldn't find phid for project '%s'" % self.project)
+
+        task_infos = None
+        while not task_infos:
+            task_infos = self.edit_template(
+                "\n"
+                "# Merge branch: %s\n"
+                "# Please enter a task title and description for the merge "
+                "request" % self.repo.active_branch.name)
+
+        description = ""
+        title = task_infos[0]
+        if len(task_infos) > 1:
+            description = '\n'.join(task_infos[1:])
+
+        return conduit("maniphest.createtask", {"title": title,
+                                                "projectPHIDs": phids,
+                                                "description": description})
 
 
 # Copied from git-bz
@@ -200,6 +248,8 @@ def do_attach(args):
     if args.repo.is_dirty():
         die("Repository is dirty. Aborting.")
 
+    summary = ""
+
     # Oldest commit is last in the list
     commits = get_commits(args.revision_range)
     all_commits = list(args.repo.iter_commits(commits[-1].hexsha + "^..HEAD"))
@@ -214,6 +264,15 @@ def do_attach(args):
     # Ask confirmation before doing any harm
     for c in commits:
         print_commit(c)
+
+    if not args.task:
+        if prompt("Create a task for above commits?"):
+            try:
+                args.task = args.create_task()["response"]["objectName"]
+                summary += "New: task %s\n" % args.task
+            except KeyError:
+                die("Could not create task.")
+
     if not prompt("Attach above commits?" if not args.task else
                   "Attach above commits to task %s?" % args.task):
         print("Aborting")
@@ -230,8 +289,6 @@ def do_attach(args):
     if args.message:
         options.append('--message "' + args.message + '"')
     arc_cmd = 'arc diff %s HEAD~1' % (' '.join(options))
-
-    summary = ""
 
     try:
         # Detach HEAD from the branch; this gives a cleaner reflog for the
