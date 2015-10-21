@@ -100,7 +100,7 @@ class GitPhab:
 
         reply = conduit("maniphest.createtask", {
             "title": title,
-            "description": description
+            "description": description,
             "projectPHIDs": [self.project_phid],
         })
 
