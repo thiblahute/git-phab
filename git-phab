@@ -28,6 +28,7 @@ import os
 import re
 import sys
 import json
+import configparser
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -148,6 +149,9 @@ def validate_args(args):
     args.repo = git.Repo(os.getcwd())
     args.read_arcconfig()
 
+    if not hasattr(args, 'revision_range'):
+        args.revision_range = None
+
     # Ensure user has setup git-phab before first usage
     try:
         config_remote = args.repo.config_reader().get_value('phab', 'remote')
@@ -203,6 +207,26 @@ def validate_args(args):
     if args.task and not re.fullmatch('T[0-9]+', args.task):
         die(("Task '%s' is not in the correct format. "
              "Expecting 'T123'." % args.task))
+
+    if not args.revision_range:
+        branchname = str(args.repo.head.reference)
+        try:
+            baseremote = args.repo.config_reader().get_value(
+                'branch "%s"' % branchname, "remote")
+            basebranch = args.repo.config_reader().get_value(
+                'branch "%s"' % branchname, "merge")
+            basebranch = basebranch.replace("refs/heads/", "")
+            args.revision_range = baseremote + "/" + basebranch + ".."
+            print("Revision range set to: %s" % args.revision_range)
+        except configparser.NoSectionError:
+            die("There is no tracking information for the current branch.\n"
+                "Please specify the patches you want to attach setting"
+                " the <revision range> \n"
+                "See git phab attach --help for details.\n\n"
+                "If you wish to set tracking information for this branch you "
+                "can do so with: \n\n"
+                "  git branch --set-upstream-to <remote>/<branch> %s"
+                % branchname)
 
 
 def parse_commit_msg(msg):
@@ -529,8 +553,11 @@ attach_parser.add_argument(
           "Overrides 'phab.remote' configuration."))
 attach_parser.add_argument(
     'revision_range', metavar='<revision range>',
-    nargs='?', default='origin/master..',
-    help="commit or revision range to attach (Default: 'origin/master..')")
+    nargs='?', default='',
+    help="commit or revision range to show."
+    " When not specified, branch.*.remote configuration "
+    "  for the current branch is consulted to determine what"
+    " to propose. ")
 attach_parser.add_argument(
     '--assume-yes', '-y', dest="assume_yes", action="store_true",
     help="Automatic yes to prompts. "
@@ -541,8 +568,11 @@ log_parser = subparsers.add_parser(
     'log', help="Show commit logs with their differential ID")
 log_parser.add_argument(
     'revision_range', metavar='<revision range>',
-    nargs='?', default='origin/master..',
-    help="commit or revision range to show (Default: 'origin/master..')")
+    nargs='?', default=None,
+    help="commit or revision range to show."
+    " When not specified, branch.*.remote configuration "
+    "  for the current branch is consulted to determine what"
+    " to propose. ")
 log_parser.set_defaults(func=do_log)
 
 fetch_parser = subparsers.add_parser(
