@@ -49,6 +49,12 @@ class GitPhab:
                 "Make sure the current repository is properly configured "
                 "for phabricator" % e.args[0])
 
+        reply = conduit("project.query", {"names": [self.project]})
+        phids = [phid for phid in reply["response"]["data"].keys()]
+        if len(phids) != 1:
+            die("Couldn't find phid for project '%s'" % self.project)
+        self.project_phid = phids[0]
+
     # Copied from git-bz
     def edit_file(self, filename):
         editor = self.repo.git.var("GIT_EDITOR")
@@ -73,11 +79,6 @@ class GitPhab:
             return [l for l in f.readlines() if not l.startswith("#")]
 
     def create_task(self):
-        reply = conduit("project.query", {"names": [self.project]})
-        phids = [phid for phid in reply["response"]["data"].keys()]
-        if len(phids) != 1:
-            die("Couldn't find phid for project '%s'" % self.project)
-
         task_infos = None
         while not task_infos:
             task_infos = self.edit_template(
@@ -311,6 +312,7 @@ def do_attach(args):
                     body.append("Depends on %s" % last_revision_id)
                 if args.task:
                     fields.append("Maniphest Tasks: %s" % args.task)
+                fields.append("Projects: %s" % args.project_phid)
 
                 msg = '\n\n'.join([subject,
                                    '\n'.join(body),
