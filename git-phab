@@ -260,6 +260,15 @@ def create_task():
                                             "description": description})
 
 
+def task_from_branchname():
+    name = str(repo.head.reference)
+    m = re.search('(^T[0-9]+)($|-.*)', name)
+    if m is not None:
+        return m.group(1)
+
+    return None
+
+
 def do_attach(args):
     if args.repo.is_dirty():
         die("Repository is dirty. Aborting.")
@@ -280,7 +289,12 @@ def do_attach(args):
         print_commit(c)
 
     if not args.task:
-        if prompt("Create a task for above commits?"):
+        res = input("Specify task or enter 'y' to create a task or "
+                    "'n' if you do not want any task to be associated to "
+                    "revision(s): ")
+        if re.fullmatch('T[0-9]+', res):
+            args.task = res
+        else:
             try:
                 args.task = create_task()["response"]["objectName"]
             except KeyError:
@@ -384,8 +398,29 @@ def do_attach(args):
                 remote.push('HEAD:refs/heads/' + branch, force=True)
                 summary += "Branch pushed to %s/%s\n" % (remote, branch)
 
+            if not task_from_branchname():
+                new_bname = "%s-%s" % (args.task, str(repo.head.reference))
+                branch = [b for b in repo.branches if b.name == new_bname]
+                if branch:
+                    if prompt('Reset branch %s to what has just been sent '
+                              'to phabricator?' % new_bname):
+                        commit = repo.commit().hexsha
+                        branch = branch[0]
+                        try:
+                            branch.checkout()
+                            repo.git.reset("--hard", commit)
+                        except Exception as e:
+                            print("Failed to reset --hard %s on %s (%s)" % (
+                                commit, new_bname, e))
+                elif prompt('Create a new branch called: %s?' % new_bname):
+                        try:
+                            repo.git.checkout("-b", new_bname)
+                        except Exception as e:
+                            print("Failed to create branch %s (%s)" % (
+                                new_bname, e))
+
+            uri = "%s#%s" % (remote.config_reader.get('url'), branch)
             try:
-                uri = "%s#%s" % (remote.config_reader.get('url'), branch)
                 conduit('maniphest.update', {
                     "id": int(args.task[1:]),
                     "auxiliary": {
@@ -393,7 +428,7 @@ def do_attach(args):
                     }
                 })
             except:
-                print("Failed to set std:maniphest:git:uri-branch")
+                print("Failed to set std:maniphest:git:uri-branch to %s" % uri)
 
         except Exception as e:
             summary += "Failed: push wip branch: %s\n" % e
