@@ -207,8 +207,9 @@ def validate_args(args):
             if prompt("The configured phab.remote (%s) is using ssh.\n"
                       "It means it might not be readable by some people.\n"
                       "Are you sure you want to continue?" % args.remote):
-                args.repo.config_writer().set_value('phab', 'force-ssh-remote',
-                                                    True)
+                writer = args.repo.config_writer()
+                writer.set_value('phab', 'force-ssh-remote', True)
+                writer.release()
             else:
                 pushurl = urlunsplit(url)
                 fetchurl = urlunsplit(url._replace(scheme='git'))
