@@ -299,12 +299,28 @@ def task_from_branchname():
     return None
 
 
+def filter_already_proposed_commits(args, commits):
+    if not fetch(args):
+        # No branch has been proposed yet for current task
+        return commits
+
+    res = []
+    proposed_commits = list(args.repo.iter_commits("%s~%d..%s" % (
+        args.task, len(commits), args.task)))
+    for c in commits:
+        if c not in proposed_commits:
+            res.append(c)
+
+    return res
+
+
 def do_attach(args):
     if args.repo.is_dirty():
         die("Repository is dirty. Aborting.")
 
     # Oldest commit is last in the list
     commits = get_commits(args.revision_range)
+    commits = filter_already_proposed_commits(args, commits)
     all_commits = list(args.repo.iter_commits(commits[-1].hexsha + "^..HEAD"))
 
     # Sanity checks
@@ -477,7 +493,7 @@ def do_log(args):
         print_commit(c)
 
 
-def do_fetch(args):
+def fetch(args):
     branch = get_wip_branch(args)
     remote = args.remote
 
@@ -490,11 +506,18 @@ def do_fetch(args):
             uri = props['auxiliary']['std:maniphest:git:uri-branch']
             remote, branch = uri.split('#')
         except:
-            print("Couldn't get git URI from Maniphest")
+            return False
 
-    print("Git URI: %s, branch: %s" % (remote, branch))
     args.repo.git.fetch(remote, "%s:%s" % (branch, args.task), force=True)
-    print("Branch %s created." % args.task)
+
+    return True
+
+
+def do_fetch(args):
+    if fetch(args):
+        print("Branch %s created." % args.task)
+    else:
+        print("Could not fetch branch from task %s." % args.task)
 
 
 def do_browse(args):
