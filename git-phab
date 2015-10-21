@@ -49,12 +49,17 @@ def die(message):
 
 
 # Copied from git-bz
-def prompt(message):
+def prompt(message, assume_yes):
     try:
         while True:
             # Using print here could result in Python adding a stray space
             # before the next print
             sys.stdout.write(message + " [yn] ")
+            if assume_yes:
+                sys.stdout.write(message + ": y\n")
+                sys.stdout.flush()
+                return True
+
             sys.stdout.flush()
             line = sys.stdin.readline().strip()
             if line == 'y' or line == 'Y':
@@ -176,7 +181,8 @@ def validate_args(args):
         if not force_ssh:
             if prompt("The configured phab.remote (%s) is using ssh.\n"
                       "It means it might not be readable by some people.\n"
-                      "Are you sure you want to continue?" % args.remote):
+                      "Are you sure you want to continue?" % args.remote,
+                      args.assume_yes):
                 args.repo.config_writer().set_value('phab', 'force-ssh-remote',
                                                     True)
             else:
@@ -301,7 +307,8 @@ def do_attach(args):
                 die("Could not create task.")
 
     if not prompt("Attach above commits?" if not args.task else
-                  "Attach above commits to task %s?" % args.task):
+                  "Attach above commits to task %s?" % args.task,
+                  args.assume_yes):
         print("Aborting")
         sys.exit(0)
 
@@ -394,7 +401,8 @@ def do_attach(args):
         try:
             branch = get_wip_branch(args)
             remote = args.repo.remote(args.remote)
-            if prompt('Push HEAD to %s/%s?' % (remote, branch)):
+            if prompt('Push HEAD to %s/%s?' % (remote, branch),
+                      args.assume_yes):
                 remote.push('HEAD:refs/heads/' + branch, force=True)
                 summary += "Branch pushed to %s/%s\n" % (remote, branch)
 
@@ -403,7 +411,8 @@ def do_attach(args):
                 branch = [b for b in repo.branches if b.name == new_bname]
                 if branch:
                     if prompt('Reset branch %s to what has just been sent '
-                              'to phabricator?' % new_bname):
+                              'to phabricator?' % new_bname,
+                              args.assume_yes):
                         commit = repo.commit().hexsha
                         branch = branch[0]
                         try:
@@ -412,7 +421,8 @@ def do_attach(args):
                         except Exception as e:
                             print("Failed to reset --hard %s on %s (%s)" % (
                                 commit, new_bname, e))
-                elif prompt('Create a new branch called: %s?' % new_bname):
+                elif prompt('Create a new branch called: %s?' % new_bname,
+                            args.assume_yes):
                         try:
                             repo.git.checkout("-b", new_bname)
                         except Exception as e:
@@ -521,6 +531,10 @@ attach_parser.add_argument(
     'revision_range', metavar='<revision range>',
     nargs='?', default='origin/master..',
     help="commit or revision range to attach (Default: 'origin/master..')")
+attach_parser.add_argument(
+    '--assume-yes', '-y', dest="assume_yes", action="store_true",
+    help="Automatic yes to prompts. "
+    "Assume `yes` as answer to all prompts.")
 attach_parser.set_defaults(func=do_attach)
 
 log_parser = subparsers.add_parser(

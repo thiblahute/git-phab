@@ -62,9 +62,9 @@ Attach all commits since origin/master, excluding top commit
 
   $ git phab attach origin/master..HEAD^
 
-Attach top 3 patches, link them to a task, and set reviewers
+Attach top 3 patches, link them to a task, and set reviewers, assuming answers to prompts is 'yes'
 
-  $ git phab attach --reviewers xclaesse,smcv --task T123 HEAD~3..
+  $ git phab attach -y --reviewers xclaesse,smcv --task T123 HEAD~3..
 
 Push current branch to origin/wip/phab/T123
 
