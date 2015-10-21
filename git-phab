@@ -74,8 +74,8 @@ def prompt(message, assume_yes):
 
 
 # Copied from git-bz
-def edit_file(filename):
-    editor = repo.git.var("GIT_EDITOR")
+def edit_file(args, filename):
+    editor = args.repo.git.var("GIT_EDITOR")
     process = subprocess.Popen(editor + " " + filename, shell=True)
     process.wait()
     if process.returncode != 0:
@@ -83,7 +83,7 @@ def edit_file(filename):
 
 
 # Copied from git-bz
-def edit_template(template):
+def edit_template(args, template):
     # Prompts the user to edit the text 'template' and returns list of
     # lines with comments stripped
 
@@ -92,7 +92,7 @@ def edit_template(template):
     f.write(template)
     f.close()
 
-    edit_file(filename)
+    edit_file(args, filename)
 
     return [l for l in open(filename, "r").readlines()
             if not l.startswith("#")]
@@ -245,8 +245,8 @@ def parse_commit_msg(msg):
     return subject, body, fields
 
 
-def get_arcconfig():
-    farcconf = os.path.join(repo.git.rev_parse("--show-toplevel"),
+def get_arcconfig(args):
+    farcconf = os.path.join(args.repo.git.rev_parse("--show-toplevel"),
                             ".arcconfig")
 
     try:
@@ -257,8 +257,8 @@ def get_arcconfig():
         return None
 
 
-def create_task():
-    arcconf = get_arcconfig()
+def create_task(args):
+    arcconf = get_arcconfig(args)
     project = None
     if arcconf:
         try:
@@ -275,9 +275,10 @@ def create_task():
 
     task_infos = None
     while not task_infos:
-        task_infos = edit_template("# Merge branch: %s\n\n"
+        task_infos = edit_template(args,
+                                   "# Merge branch: %s\n\n"
                                    "# Please enter a task title for the "
-                                   "merge request" % repo.active_branch.name)
+                                   "merge request" % args.repo.active_branch.name)
 
     description = ""
     title = task_infos[0].replace("\n", "")
@@ -290,8 +291,8 @@ def create_task():
                                             "description": description})
 
 
-def task_from_branchname():
-    name = str(repo.head.reference)
+def task_from_branchname(args):
+    name = str(args.repo.head.reference)
     m = re.search('(^T[0-9]+)($|-.*)', name)
     if m is not None:
         return m.group(1)
@@ -318,6 +319,18 @@ def do_attach(args):
     if args.repo.is_dirty():
         die("Repository is dirty. Aborting.")
 
+    if not args.task:
+        res = input("Specify task or enter 'y' to create a task or "
+                    "'n' if you do not want any task to be associated to "
+                    "revision(s): ")
+        if re.fullmatch('T[0-9]+', res):
+            args.task = res
+        else:
+            try:
+                args.task = create_task(args)["response"]["objectName"]
+            except KeyError:
+                die("Could not create task.")
+
     # Oldest commit is last in the list
     commits = get_commits(args.revision_range)
     commits = filter_already_proposed_commits(args, commits)
@@ -333,18 +346,6 @@ def do_attach(args):
     # Ask confirmation before doing any harm
     for c in commits:
         print_commit(c)
-
-    if not args.task:
-        res = input("Specify task or enter 'y' to create a task or "
-                    "'n' if you do not want any task to be associated to "
-                    "revision(s): ")
-        if re.fullmatch('T[0-9]+', res):
-            args.task = res
-        else:
-            try:
-                args.task = create_task()["response"]["objectName"]
-            except KeyError:
-                die("Could not create task.")
 
     if not prompt("Attach above commits?" if not args.task else
                   "Attach above commits to task %s?" % args.task,
@@ -446,25 +447,25 @@ def do_attach(args):
                 remote.push('HEAD:refs/heads/' + branch, force=True)
                 summary += "Branch pushed to %s/%s\n" % (remote, branch)
 
-            if not task_from_branchname():
-                new_bname = "%s-%s" % (args.task, str(repo.head.reference))
-                branch = [b for b in repo.branches if b.name == new_bname]
+            if not task_from_branchname(args):
+                new_bname = "%s-%s" % (args.task, str(args.repo.head.reference))
+                branch = [b for b in args.repo.branches if b.name == new_bname]
                 if branch:
                     if prompt('Reset branch %s to what has just been sent '
                               'to phabricator?' % new_bname,
                               args.assume_yes):
-                        commit = repo.commit().hexsha
+                        commit = args.repo.commit().hexsha
                         branch = branch[0]
                         try:
                             branch.checkout()
-                            repo.git.reset("--hard", commit)
+                            args.repo.git.reset("--hard", commit)
                         except Exception as e:
                             print("Failed to reset --hard %s on %s (%s)" % (
                                 commit, new_bname, e))
                 elif prompt('Create a new branch called: %s?' % new_bname,
                             args.assume_yes):
                         try:
-                            repo.git.checkout("-b", new_bname)
+                            args.repo.git.checkout("-b", new_bname)
                         except Exception as e:
                             print("Failed to create branch %s (%s)" % (
                                 new_bname, e))
