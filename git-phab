@@ -51,6 +51,10 @@ class GitPhab:
                 "Make sure the current repository is properly configured "
                 "for phabricator" % e.args[0])
 
+        # Remove trailing '/' if any
+        if self.phabricator_uri[-1] == '/':
+            self.phabricator_uri = self.phabricator_uri[:-1]
+
         reply = conduit("project.query", {"names": [self.project]})
         phids = [phid for phid in reply["response"]["data"].keys()]
         if len(phids) != 1:
