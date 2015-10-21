@@ -366,6 +366,7 @@ def do_browse(args):
     for obj in args.objects:
         if re.fullmatch('(T|D)[0-9]+', obj):
             urls.append(args.phabricator_uri + "/" + obj)
+            continue
 
         try:
             commit = args.repo.rev_parse(obj)
