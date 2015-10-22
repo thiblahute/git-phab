@@ -431,7 +431,7 @@ def do_browse(args):
     if not args.objects:
         if not args.task:
             die("Could not figure out a task from branch name")
-        args.objects = [task]
+        args.objects = [args.task]
 
     for obj in args.objects:
         if re.fullmatch('(T|D)[0-9]+', obj):
