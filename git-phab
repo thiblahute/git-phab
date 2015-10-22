@@ -39,6 +39,7 @@ class GitPhab:
         self.remote = None
         self.assume_yes = False
         self.revision_range = None
+        self.reviewers = None
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
@@ -261,6 +262,9 @@ def validate_args(args):
                 % str(args.repo.head.reference))
         args.revision_range = str(tracking) + '..'
         print("Using revision range '%s'" % args.revision_range)
+
+    if not args.reviewers:
+        args.reviewers = args.arcconfig.get("default-reviewers")
 
 
 def parse_commit_msg(msg):
