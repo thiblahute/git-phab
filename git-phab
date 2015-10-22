@@ -38,6 +38,7 @@ class GitPhab:
         self.task = None
         self.remote = None
         self.assume_yes = False
+        self.revision_range = None
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
@@ -247,6 +248,19 @@ def validate_args(args):
     if args.task and not re.fullmatch('T[0-9]+', args.task):
         die(("Task '%s' is not in the correct format. "
              "Expecting 'T123'." % args.task))
+
+    if not args.revision_range:
+        tracking = args.repo.head.reference.tracking_branch()
+        if not tracking:
+            die("There is no tracking information for the current branch.\n"
+                "Please specify the patches you want to attach by setting "
+                "the <revision range> \n\n"
+                "If you wish to set tracking information for this branch you "
+                "can do so with: \n"
+                "  git branch --set-upstream-to <remote>/<branch> %s"
+                % str(args.repo.head.reference))
+        args.revision_range = str(tracking) + '..'
+        print("Using revision range '%s'" % args.revision_range)
 
 
 def parse_commit_msg(msg):
@@ -534,8 +548,9 @@ attach_parser.add_argument(
     .completer = DisabledCompleter
 attach_parser.add_argument(
     'revision_range', metavar='<revision range>',
-    nargs='?', default='origin/master..',
-    help="commit or revision range to attach (Default: 'origin/master..')") \
+    nargs='?', default=None,
+    help="commit or revision range to attach. When not specified, "
+         "the tracking branch is used") \
     .completer = DisabledCompleter
 attach_parser.set_defaults(func=do_attach)
 
@@ -543,8 +558,9 @@ log_parser = subparsers.add_parser(
     'log', help="Show commit logs with their differential ID")
 log_parser.add_argument(
     'revision_range', metavar='<revision range>',
-    nargs='?', default='origin/master..',
-    help="commit or revision range to show (Default: 'origin/master..')") \
+    nargs='?', default=None,
+    help="commit or revision range to show. When not specified, "
+         "the tracking branch is used") \
     .completer = DisabledCompleter
 log_parser.set_defaults(func=do_log)
 
