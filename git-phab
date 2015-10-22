@@ -392,8 +392,8 @@ def do_attach(args):
                 remote.push('HEAD:refs/heads/' + branch, force=True)
                 summary += "Branch pushed to %s/%s\n" % (remote, branch)
 
+            uri = "%s#%s" % (remote.config_reader.get('url'), branch)
             try:
-                uri = "%s#%s" % (remote.config_reader.get('url'), branch)
                 conduit('maniphest.update', {
                     "id": int(args.task[1:]),
                     "auxiliary": {
@@ -401,7 +401,7 @@ def do_attach(args):
                     }
                 })
             except:
-                print("Failed to set std:maniphest:git:uri-branch")
+                print("Failed to set std:maniphest:git:uri-branch to %s" % uri)
 
         except Exception as e:
             summary += "Failed: push wip branch: %s\n" % e
