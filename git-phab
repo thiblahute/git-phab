@@ -277,6 +277,22 @@ class GitPhab:
 
         return subject, body, fields
 
+    def replace_fields(self, string):
+        # This is the list of fields phabricator will search by default in
+        # commit messages. Case insensitive.
+        fields = ['title:', 'summary:', 'test plan:', 'testplan:', 'tested:',
+                  'tests:', 'reviewer:', 'reviewers:', 'reviewed by:', 'cc:',
+                  'ccs:', 'subscriber:', 'subscribers:', 'project:',
+                  'projects:', 'maniphest task:', 'maniphest tasks:',
+                  'differential revision:', 'conflicts:', 'git-svn-id:',
+                  'auditors:']
+
+        for field in fields:
+            field_ = field[:-1] + '_:'
+            string = re.sub(field, field_, string, flags=re.I)
+
+        return string
+
     def do_attach(self):
         if self.repo.is_dirty():
             self.die("Repository is dirty. Aborting.")
@@ -357,9 +373,10 @@ class GitPhab:
                         fields.append("Maniphest Tasks: %s" % self.task)
                     fields.append("Projects: %s" % self.project_phid)
 
-                    msg = '\n\n'.join([subject,
-                                       '\n'.join(body),
-                                       '\n'.join(fields)])
+                    subject = self.replace_fields(subject.strip())
+                    body = self.replace_fields('\n'.join(body).strip())
+                    fields = '\n'.join(fields).strip()
+                    msg = '\n\n'.join([subject, body, fields])
 
                     self.repo.head.commit = self.repo.head.commit.parents[0]
                     self.repo.head.commit = self.repo.index.commit(msg)
