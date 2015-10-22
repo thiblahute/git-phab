@@ -37,6 +37,7 @@ class GitPhab:
     def __init__(self):
         self.task = None
         self.remote = None
+        self.assume_yes = False
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
@@ -68,6 +69,10 @@ class GitPhab:
                 # Using print here could result in Python adding a stray space
                 # before the next print
                 sys.stdout.write(message + " [yn] ")
+                if self.assume_yes:
+                    sys.stdout.write("y\n")
+                    sys.stdout.flush()
+                    return True
                 sys.stdout.flush()
                 line = sys.stdin.readline().strip()
                 if line == 'y' or line == 'Y':
@@ -516,6 +521,10 @@ attach_parser.add_argument(
     '--remote', metavar='<remote>',
     help=("A remote repository to push to. "
           "Overrides 'phab.remote' configuration.")) \
+    .completer = DisabledCompleter
+attach_parser.add_argument(
+    '--assume-yes', '-y', dest="assume_yes", action="store_true",
+    help="Assume `yes` as answer to all prompts.") \
     .completer = DisabledCompleter
 attach_parser.add_argument(
     'revision_range', metavar='<revision range>',
