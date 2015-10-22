@@ -317,6 +317,7 @@ def do_attach(args):
         options.append('--message "' + args.message + '"')
     arc_cmd = 'arc diff %s HEAD~1' % (' '.join(options))
 
+    arc_failed = False
     try:
         # Detach HEAD from the branch; this gives a cleaner reflog for the
         # branch
@@ -328,11 +329,12 @@ def do_attach(args):
         for commit in reversed(all_commits):
             args.repo.git.cherry_pick(commit.hexsha)
 
-            if commit in commits:
+            if not arc_failed and commit in commits:
                 # Add extra info in the commit msg. It is important that
                 # phabricator fields are last, after all common git fields like
                 # 'Reviewed-by:', etc. Note that "Depends on" is not a field
                 # and is parsed from the body part.
+                orig_commit = args.repo.head.commit
                 subject, body, fields = parse_commit_msg(commit.message)
                 if last_revision_id:
                     body.append("Depends on %s" % last_revision_id)
@@ -351,9 +353,13 @@ def do_attach(args):
                 try:
                     subprocess.check_call(arc_cmd, shell=True)
                 except:
-                    print("Command '%s' failed. Continuing." % arc_cmd)
-                    summary += "Failed: %s\n" % format_commit(commit)
-                    args.repo.head.commit = commit
+                    print("Command '%s' failed. Finnish rebuilding branch "
+                          "without proposing further patches" % arc_cmd)
+                    arc_failed = True
+                    args.repo.head.commit = orig_commit
+                    summary += "Failed proposing: %s -- " \
+                        "NO MORE PATCH PROPOSED\n" % format_commit(
+                            args.repo.head.commit)
                     continue
 
                 # arc diff modified our commit message. Re-commit it with the
@@ -389,7 +395,7 @@ def do_attach(args):
         args.repo.head.reset(index=True, working_tree=True)
         raise
 
-    if args.task:
+    if args.task and not arc_failed:
         try:
             branch = get_wip_branch(args)
             remote = args.repo.remote(args.remote)
@@ -411,29 +417,29 @@ def do_attach(args):
         except Exception as e:
             summary += "Failed: push wip branch: %s\n" % e
 
-        if not args.branch_task:
-            # Check if we already have a branch for this task
-            branch = None
-            for b in args.repo.branches:
-                if args.task_from_branchname(b.name) == args.task:
-                    branch = b
-                    break
+    if args.task and not args.branch_task:
+        # Check if we already have a branch for this task
+        branch = None
+        for b in args.repo.branches:
+            if args.task_from_branchname(b.name) == args.task:
+                branch = b
+                break
 
-            if branch:
-                if args.prompt('Reset branch %s to what has just been sent '
-                               'to phabricator?' % branch.name):
-                    branch.commit = args.repo.head.commit
-                    summary += "Branch %s reset to %s" % \
-                               (branch.name, branch.commit)
-            else:
-                cur_bname = str(args.repo.head.reference)
-                new_bname = args.task
-                if cur_bname not in ["master"]:
-                    new_bname += '-' + cur_bname
+        if branch:
+            if args.prompt('Reset branch %s to what has just been sent '
+                           'to phabricator?' % branch.name):
+                branch.commit = args.repo.head.commit
+                summary += "Branch %s reset to %s" % \
+                           (branch.name, branch.commit)
+        else:
+            cur_bname = str(args.repo.head.reference)
+            new_bname = args.task
+            if cur_bname not in ["master"]:
+                new_bname += '-' + cur_bname
 
-                if args.prompt('Create a new branch called: %s?' % new_bname):
-                    args.repo.create_head(new_bname)
-                    summary += "Branch %s created" % new_bname
+            if args.prompt('Create a new branch called: %s?' % new_bname):
+                args.repo.create_head(new_bname)
+                summary += "Branch %s created" % new_bname
 
     print("\n\nSummary:")
     print(summary)
