@@ -588,7 +588,8 @@ if __name__ == '__main__':
              "task.") \
         .completer = DisabledCompleter
 
-    obj = GitPhab()
     argcomplete.autocomplete(parser)
+
+    obj = GitPhab()
     parser.parse_args(namespace=obj)
     obj.run()
