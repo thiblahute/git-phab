@@ -406,6 +406,30 @@ def do_attach(args):
         except Exception as e:
             summary += "Failed: push wip branch: %s\n" % e
 
+        if not args.branch_task:
+            # Check if we already have a branch for this task
+            branch = None
+            for b in args.repo.branches:
+                if args.task_from_branchname(b.name) == args.task:
+                    branch = b
+                    break
+
+            if branch:
+                if prompt('Reset branch %s to what has just been sent '
+                          'to phabricator?' % branch.name):
+                    branch.commit = args.repo.head.commit
+                    summary += "Branch %s reset to %s" % \
+                               (branch.name, branch.commit)
+            else:
+                cur_bname = str(args.repo.head.reference)
+                new_bname = args.task
+                if cur_bname not in ["master"]:
+                    new_bname += '-' + cur_bname
+
+                if prompt('Create a new branch called: %s?' % new_bname):
+                    args.repo.create_head(new_bname)
+                    summary += "Branch %s created" % new_bname
+
     print("\n\nSummary:")
     print(summary)
 
