@@ -49,6 +49,7 @@ class GitPhab:
         self.assume_yes = False
         self.reviewers = None
         self.remote_from_config = False
+        self.projects = None
 
     # Copied from git-bz
     def die(self, message):
@@ -117,7 +118,7 @@ class GitPhab:
         reply = self.conduit("maniphest.createtask", {
             "title": title,
             "description": description,
-            "projectPHIDs": [self.project_phid],
+            "projectPHIDs": self.project_phids,
         })
 
         return reply
@@ -215,7 +216,7 @@ class GitPhab:
 
         try:
             self.phabricator_uri = self.arcconfig["phabricator.uri"]
-            self.project = self.arcconfig["project"]
+            self.default_project = self.arcconfig["project"]
         except KeyError as e:
             self.die("Could not find '%s' in .arcconfig.\n"
                      "Make sure the current repository is properly configured "
@@ -225,12 +226,15 @@ class GitPhab:
         if self.phabricator_uri[-1] == '/':
             self.phabricator_uri = self.phabricator_uri[:-1]
 
-    def ensure_project_phid(self):
-        reply = self.conduit("project.query", {"names": [self.project]})
-        phids = [phid for phid in reply["response"]["data"].keys()]
-        if len(phids) != 1:
-            self.die("Couldn't find phid for project '%s'" % self.project)
-        self.project_phid = phids[0]
+    def ensure_project_phids(self):
+        reply = self.conduit("project.query", {"names": self.projects})
+        self.project_phids = list(reply["response"]["data"].keys())
+
+        names = [p["name"].lower() for p in reply["response"]["data"].values()]
+        for p in self.projects:
+            if p not in names:
+                self.die("%sProject `%s` doesn't seem to exist%s" %
+                         (Colors.FAIL, p, Colors.ENDC))
 
     def validate_args(self):
         self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
@@ -313,6 +317,10 @@ class GitPhab:
         if not self.reviewers:
             self.reviewers = self.arcconfig.get("default-reviewers")
 
+        self.projects = self.projects.split(',') if self.projects else []
+        self.projects.append(self.default_project)
+        self.projects = [s.lower() for s in self.projects]
+
     def parse_commit_msg(self, msg):
         subject = None
         body = []
@@ -355,7 +363,7 @@ class GitPhab:
                      "going to attach to task %s. Aborting."
                      % (self.branch_task, self.task))
 
-        self.ensure_project_phid()
+        self.ensure_project_phids()
 
         summary = ""
 
@@ -423,7 +431,8 @@ class GitPhab:
                         body.append("Depends on %s" % last_revision_id)
                     if self.task:
                         fields.append("Maniphest Tasks: %s" % self.task)
-                    fields.append("Projects: %s" % self.project_phid)
+                    fields.append("Projects: %s" %
+                                  ','.join(self.project_phids))
 
                     subject = self.replace_fields(subject.strip())
                     body = self.replace_fields('\n'.join(body).strip())
@@ -650,6 +659,12 @@ if __name__ == '__main__':
     attach_parser.add_argument(
         '--assume-yes', '-y', dest="assume_yes", action="store_true",
         help="Assume `yes` as answer to all prompts.") \
+        .completer = DisabledCompleter
+    attach_parser.add_argument(
+        '--projects', '-p', dest="projects",
+        metavar='<project1,project2,...>',
+        help="A list of `extra` projects (they will be added to"
+        "any project(s) configured in .arcconfig)") \
         .completer = DisabledCompleter
     attach_parser.add_argument(
         'revision_range', metavar='<revision range>',
