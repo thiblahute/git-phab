@@ -158,7 +158,24 @@ class GitPhab:
         return json.loads(output.decode('utf-8'))
 
     def get_wip_branch(self):
+        if not self.task:
+            return None
+
         return "wip/phab/" + self.task
+
+    def filter_already_proposed_commits(self, commits):
+        if not self.fetch():
+            # No branch has been proposed yet for current task
+            return commits
+
+        res = []
+        proposed_commits = list(self.repo.iter_commits("%s~%d..%s" % (
+            self.task, len(commits), self.task)))
+        for c in commits:
+            if c not in proposed_commits:
+                res.append(c)
+
+        return res
 
     def validate_args(self):
         self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
@@ -308,6 +325,7 @@ class GitPhab:
 
         # Oldest commit is last in the list
         commits = self.get_commits()
+        commits = self.filter_already_proposed_commits(commits)
         s = commits[-1].hexsha + "^..HEAD"
         all_commits = list(self.repo.iter_commits(s))
 
@@ -477,14 +495,12 @@ class GitPhab:
         print("\n\nSummary:")
         print(summary)
 
-    def do_log(self):
-        commits = self.get_commits()
-        for c in commits:
-            self.print_commit(c)
-
-    def do_fetch(self):
+    def fetch(self):
         branch = self.get_wip_branch()
         remote = self.remote
+
+        if not branch:
+            return False
 
         if self.remote_from_config:
             try:
@@ -497,9 +513,22 @@ class GitPhab:
             except:
                 print("Couldn't get git URI from Maniphest")
 
-        print("Git URI: %s, branch: %s" % (remote, branch))
+                return False
+
         self.repo.git.fetch(remote, "%s:%s" % (branch, self.task), force=True)
-        print("Branch %s created." % self.task)
+
+        return True
+
+    def do_log(self):
+        commits = self.get_commits()
+        for c in commits:
+            self.print_commit(c)
+
+    def do_fetch(self):
+        if self.fetch():
+            print("Branch %s created." % self.task)
+        else:
+            print("Could not fetch branch from task %s." % self.task)
 
     def do_browse(self):
         urls = []
