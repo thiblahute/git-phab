@@ -51,6 +51,8 @@ class GitPhab:
         self.reviewers = None
         self.remote_from_config = False
         self.extra_projects = None
+        self.message = None
+        self.objects = None
 
     # Copied from git-bz
     def die(self, message):
@@ -588,8 +590,12 @@ class GitPhab:
 
     def run(self):
         self.validate_args()
-        method = 'do_' + self.subparser_name
-        getattr(self, method)()
+
+        if not self.subparser_name:
+            self.do_attach()
+        else:
+            method = 'do_' + self.subparser_name
+            getattr(self, method)()
 
 
 def DisabledCompleter(prefix, **kwargs):
