@@ -214,6 +214,28 @@ class GitPhab:
     def get_wip_branch(self):
         return "wip/phab/" + self.branch_name_with_task()
 
+    def filter_already_proposed_commits(self, commits):
+        if not self.task:
+            return commits
+
+        # Fetch what has already been proposed on the task
+        try:
+            fetch_head, branch = self.fetch()
+        except:
+            return commits
+
+        common_ancestor = self.repo.git.merge_base(fetch_head.hexsha,
+                                                   commits[0].hexsha)
+        common_ancestor = self.repo.commit(common_ancestor)
+        common_ancestor_idx = commits.index(common_ancestor)
+        if common_ancestor_idx >= 0:
+            print("Excluding already proposed commits %s..%s" % (
+                  commits[common_ancestor_idx].hexsha[:7],
+                  commits[-1].hexsha[:7]))
+            commits = commits[:common_ancestor_idx]
+
+        return commits
+
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
         try:
@@ -414,6 +436,10 @@ class GitPhab:
 
         # Oldest commit is last in the list
         commits = self.get_commits(self.revision_range)
+        commits = self.filter_already_proposed_commits(commits)
+        if not commits:
+            print("Everything has already been proposed")
+            return
         s = commits[-1].hexsha + "^..HEAD"
         all_commits = list(self.repo.iter_commits(s))
 
