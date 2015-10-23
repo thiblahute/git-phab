@@ -50,6 +50,7 @@ class GitPhab:
         self.revision_range = None
         self.reviewers = None
         self.remote_from_config = False
+        self.extra_projects = None
 
     # Copied from git-bz
     def die(self, message):
@@ -118,7 +119,7 @@ class GitPhab:
         reply = self.conduit("maniphest.createtask", {
             "title": title,
             "description": description,
-            "projectPHIDs": [self.project_phid],
+            "projectPHIDs": self.project_phids,
         })
 
         return reply
@@ -175,7 +176,7 @@ class GitPhab:
             if diffid:
                 ids.append(diffid)
 
-        reply = self.conduit('differential.query', { "ids": ids })
+        reply = self.conduit('differential.query', {"ids": ids})
 
         if reply["error"]:
             print("Could not get informations about differentials status")
@@ -190,7 +191,7 @@ class GitPhab:
             if statuses:
                 status = statuses.get(self.get_differential_id(c),
                                       "Not proposed yet")
-            print (self.format_commit(c, status))
+            print(self.format_commit(c, status))
 
     def conduit(self, cmd, params):
         data = bytes(json.dumps(params), 'utf-8')
@@ -202,6 +203,21 @@ class GitPhab:
     def get_wip_branch(self):
         return "wip/phab/" + self.task
 
+    def get_projects_phids(self, projects):
+        if self.extra_projects:
+            projects.extend(self.extra_projects.split(','))
+
+        reply = self.conduit("project.query", {"names": projects})
+        self.project_phids = [phid for phid in
+                              reply["response"]["data"].keys()]
+        if len(projects) != projects:
+            proj_names = [p["name"] for p in
+                          reply["response"]["data"].values()]
+            for project in projects:
+                if project not in proj_names:
+                    self.die("%sProject `%s` doesn't seem to exist%s" %
+                             (Colors.FAIL, project, Colors.ENDC))
+
     def validate_args(self):
         self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
 
@@ -209,9 +225,10 @@ class GitPhab:
         with open(path) as f:
             self.arcconfig = json.load(f)
 
+        default_projects = []
         try:
             self.phabricator_uri = self.arcconfig["phabricator.uri"]
-            self.project = self.arcconfig["project"]
+            default_projects.append(self.arcconfig["project"])
         except KeyError as e:
             self.die("Could not find '%s' in .arcconfig.\n"
                      "Make sure the current repository is properly configured "
@@ -221,11 +238,7 @@ class GitPhab:
         if self.phabricator_uri[-1] == '/':
             self.phabricator_uri = self.phabricator_uri[:-1]
 
-        reply = self.conduit("project.query", {"names": [self.project]})
-        phids = [phid for phid in reply["response"]["data"].keys()]
-        if len(phids) != 1:
-            self.die("Couldn't find phid for project '%s'" % self.project)
-        self.project_phid = phids[0]
+        self.get_projects_phids(default_projects)
 
         # Ensure user has setup git-phab before first usage
         try:
@@ -412,7 +425,8 @@ class GitPhab:
                         body.append("Depends on %s" % last_revision_id)
                     if self.task:
                         fields.append("Maniphest Tasks: %s" % self.task)
-                    fields.append("Projects: %s" % self.project_phid)
+                    fields.append("Projects: %s" %
+                                  ','.join(self.project_phids))
 
                     subject = self.replace_fields(subject.strip())
                     body = self.replace_fields('\n'.join(body).strip())
@@ -608,6 +622,12 @@ if __name__ == '__main__':
     attach_parser.add_argument(
         '--assume-yes', '-y', dest="assume_yes", action="store_true",
         help="Assume `yes` as answer to all prompts.") \
+        .completer = DisabledCompleter
+    attach_parser.add_argument(
+        '--projects', '-p', dest="extra_projects",
+        metavar='<extra_project1,extra_project2,...>', default=None,
+        help="A list of `extra` projects (they will be added to"
+        "any project(s) configured in .arcconfig)") \
         .completer = DisabledCompleter
     attach_parser.add_argument(
         'revision_range', metavar='<revision range>',
