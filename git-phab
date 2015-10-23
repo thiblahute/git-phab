@@ -124,8 +124,9 @@ class GitPhab:
         return reply
 
     def task_from_branchname(self, bname):
-        m = re.search('(^T[0-9]+)($|-.*)', bname)
-        return m.group(1) if m else None
+        # Match 'foo/bar/T123-description'
+        m = re.fullmatch('(.+/)?(T[0-9]+)(-.*)?', bname)
+        return m.group(2) if m else None
 
     def get_commits(self):
         try:
