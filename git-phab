@@ -572,6 +572,37 @@ class GitPhab:
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL)
 
+    def do_clean(self):
+        branch_task = []
+        for r in self.repo.references:
+            if r.is_remote() and r.remote_name != self.remote:
+                continue
+
+            task = self.task_from_branchname(r.name)
+            if task:
+                branch_task.append((r, task))
+
+        task_ids = [t[1:] for b, t in branch_task]
+        reply = self.conduit('maniphest.query', {"ids": task_ids})
+
+        for tphid, task in reply["response"].items():
+            if task["statusName"] != "Closed":
+                continue
+
+            for branch, task_name in branch_task:
+                if task["objectName"] != task_name:
+                    continue
+
+                if self.prompt("Task '%s' has been closed, do you want to "
+                               "delete branch '%s'?" % (task_name, branch)):
+                    if branch.is_remote():
+                        self.repo.git.push(self.remote,
+                                           ":" + branch.remote_head)
+                    else:
+                        self.repo.delete_head(branch, force=True)
+
+                    print("  -> Branch %s was deleted" % branch.name)
+
     def run(self):
         self.validate_args()
         method = 'do_' + self.subparser_name
@@ -646,6 +677,10 @@ if __name__ == '__main__':
              "a revision ID, a commit hash or empty to open current branch's "
              "task.") \
         .completer = DisabledCompleter
+
+    clean_parser = subparsers.add_parser(
+        'clean', help="Clean all branches for which the associated task"
+        " has been closed")
 
     argcomplete.autocomplete(parser)
 
