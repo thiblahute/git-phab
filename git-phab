@@ -156,12 +156,15 @@ class GitPhab:
         return int(link[link.rfind('/') + 2:]) if link else None
 
     def format_commit(self, commit, status=None):
-        diff_id = self.get_differential_id(commit)
-        diff_str = "D%s" % diff_id if diff_id else "N/A"
+        result = u"%s%s%s —" % (Colors.HEADER, commit.hexsha[:7], Colors.ENDC)
 
-        result = u"%s %s" % (commit.hexsha[:7], diff_str)
+        diffid = self.get_differential_id(commit)
+        if not diffid:
+            status = "Not attached"
+        if diffid:
+            result += u" D%s" % diffid
         if status:
-            result += u" — %s%s%s" % (
+            result += u" %s%s%s" % (
                 Colors.OKGREEN if status == "Accepted" else Colors.WARNING,
                 status,
                 Colors.ENDC)
@@ -169,28 +172,26 @@ class GitPhab:
         return result + u" — %s" % commit.summary
 
     def print_commits(self, commits):
-        ids = []
+        statuses = {}
         for c in commits:
             diffid = self.get_differential_id(c)
             if diffid:
-                ids.append(diffid)
+                statuses[int(diffid)] = "Unknown"
 
-        reply = self.conduit('differential.query', {"ids": ids})
+        reply = self.conduit('differential.query', {
+            "ids": list(statuses.keys())
+        })
 
         if reply["error"]:
             print("Could not get informations about differentials status")
-            statuses = None
         else:
-            statuses = {}
             for diff in reply["response"]:
                 statuses[int(diff["id"])] = diff["statusName"]
 
         for c in commits:
-            status = None
-            if statuses:
-                status = statuses.get(self.get_differential_id(c),
-                                      "Not proposed yet")
-            print (self.format_commit(c, status))
+            diffid = self.get_differential_id(c)
+            status = statuses.get(int(diffid)) if diffid else None
+            print(self.format_commit(c, status))
 
     def conduit(self, cmd, params):
         data = bytes(json.dumps(params), 'utf-8')
