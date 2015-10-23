@@ -220,19 +220,20 @@ class GitPhab:
                      "Make sure the current repository is properly configured "
                      "for phabricator" % e.args[0])
 
-    def validate_args(self):
-        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
-        self.read_arcconfig()
-
         # Remove trailing '/' if any
         if self.phabricator_uri[-1] == '/':
             self.phabricator_uri = self.phabricator_uri[:-1]
 
+    def ensure_project_phid(self):
         reply = self.conduit("project.query", {"names": [self.project]})
         phids = [phid for phid in reply["response"]["data"].keys()]
         if len(phids) != 1:
             self.die("Couldn't find phid for project '%s'" % self.project)
         self.project_phid = phids[0]
+
+    def validate_args(self):
+        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
+        self.read_arcconfig()
 
         # Ensure user has setup git-phab before first usage
         try:
@@ -352,6 +353,8 @@ class GitPhab:
             self.die("Your current branch name suggests task %s but you're "
                      "going to attach to task %s. Aborting."
                      % (self.branch_task, self.task))
+
+        self.ensure_project_phid()
 
         summary = ""
 
