@@ -84,7 +84,7 @@ class GitPhab:
         process = subprocess.Popen(editor + " " + filename, shell=True)
         process.wait()
         if process.returncode != 0:
-            die("Editor exited with non-zero return code")
+            self.die("Editor exited with non-zero return code")
 
     # Copied from git-bz
     def edit_template(self, template):
@@ -214,6 +214,23 @@ class GitPhab:
     def get_wip_branch(self):
         return "wip/phab/" + self.branch_name_with_task()
 
+    def filter_already_proposed_commits(self, commits):
+        fetch_head, branch = self.fetch()
+        if not fetch_head:
+            # No branch has been proposed yet for current task
+            return commits
+
+        res = []
+        common_ancestor = self.repo.git.merge_base(fetch_head.hexsha, "HEAD")
+        proposed_commits = [commit for commit in
+                            self.repo.iter_commits(
+                                common_ancestor + ".." + fetch_head.hexsha)]
+        for c in commits:
+            if c not in proposed_commits:
+                res.append(c)
+
+        return res
+
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
         try:
@@ -265,7 +282,7 @@ class GitPhab:
 
         # Validate that self.remote exists
         try:
-            remote = self.repo.remote(self.remote)
+            self.repo.remote(self.remote)
         except:
             self.die("%s not a valid remote. Aborting." % self.remote)
 
@@ -405,6 +422,10 @@ class GitPhab:
 
         # Oldest commit is last in the list
         commits = self.get_commits(self.revision_range)
+        commits = self.filter_already_proposed_commits(commits)
+        if not commits:
+            print("Everything has already been proposed")
+            return
         s = commits[-1].hexsha + "^..HEAD"
         all_commits = list(self.repo.iter_commits(s))
 
@@ -582,15 +603,22 @@ class GitPhab:
         self.print_commits(commits)
 
     def fetch(self):
+        if not self.task:
+            return (None, None)
+
         reply = self.conduit('maniphest.query', {
             "ids": [int(self.task[1:])]
         })
+
         props = list(reply['response'].values())[0]
         uri = props['auxiliary']['std:maniphest:git:uri-branch']
         remote, branch = uri.split('#')
 
         print("Git URI: %s, branch: %s" % (remote, branch))
-        self.repo.git.fetch(remote, "%s" % branch)
+        try:
+            self.repo.git.fetch(remote, "%s" % branch)
+        except git.exc.GitCommandError:
+            return (None, None)
 
         commit = self.repo.commit('FETCH_HEAD')
         print("Commit '%s' from remote branch '%s' has been fetched" %
