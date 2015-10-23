@@ -47,7 +47,6 @@ class GitPhab:
         self.task = None
         self.remote = None
         self.assume_yes = False
-        self.revision_range = None
         self.reviewers = None
         self.remote_from_config = False
 
@@ -288,7 +287,7 @@ class GitPhab:
             self.die("Task '%s' is not in the correct format. "
                      "Expecting 'T123'." % self.task)
 
-        if not self.revision_range:
+        if hasattr(self, 'revision_range') and not self.revision_range:
             tracking = self.repo.head.reference.tracking_branch()
             if not tracking:
                 self.die("There is no tracking information for the current "
