@@ -202,12 +202,15 @@ class GitPhab:
     def get_wip_branch(self):
         return "wip/phab/" + self.task
 
-    def validate_args(self):
-        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
-
+    def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
-        with open(path) as f:
-            self.arcconfig = json.load(f)
+        try:
+            with open(path) as f:
+                self.arcconfig = json.load(f)
+        except FileNotFoundError as e:
+            self.die("Could not find any .arcconfig file.\n"
+                     "Make sure the current repository is properly configured "
+                     "for phabricator")
 
         try:
             self.phabricator_uri = self.arcconfig["phabricator.uri"]
@@ -216,6 +219,10 @@ class GitPhab:
             self.die("Could not find '%s' in .arcconfig.\n"
                      "Make sure the current repository is properly configured "
                      "for phabricator" % e.args[0])
+
+    def validate_args(self):
+        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
+        self.read_arcconfig()
 
         # Remove trailing '/' if any
         if self.phabricator_uri[-1] == '/':
