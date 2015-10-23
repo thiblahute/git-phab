@@ -175,7 +175,7 @@ class GitPhab:
             if diffid:
                 ids.append(diffid)
 
-        reply = self.conduit('differential.query', { "ids": ids })
+        reply = self.conduit('differential.query', {"ids": ids})
 
         if reply["error"]:
             print("Could not get informations about differentials status")
