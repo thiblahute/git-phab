@@ -511,9 +511,11 @@ class GitPhab:
                 if self.branch_name not in ["master"]:
                     new_bname += '-' + self.branch_name
 
-                if self.prompt('Create a new branch called: %s?' % new_bname):
-                    self.repo.create_head(new_bname)
-                    summary += "Branch %s created" % new_bname
+                if self.prompt('Create and checkout a new branch called: %s?' %
+                               new_bname):
+                    new_branch = self.repo.create_head(new_bname)
+                    new_branch.checkout()
+                    summary += "Branch %s created and checked out" % new_bname
 
         print("\n\nSummary:")
         print(summary)
