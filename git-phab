@@ -33,6 +33,15 @@ import json
 from urllib.parse import urlsplit, urlunsplit
 
 
+class Colors(object):
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+
+
 class GitPhab:
     def __init__(self):
         self.task = None
@@ -142,13 +151,46 @@ class GitPhab:
                       commit.message, re.MULTILINE)
         return None if m is None else m.group(2)
 
-    def format_commit(self, commit):
+    def get_differential_id(self, commit):
         link = self.get_differential_link(commit)
-        d = "N/A" if link is None else link[link.rfind('/') + 1:]
-        return u"%s %s — %s" % (commit.hexsha[:7], d, commit.summary)
+        return int(link[link.rfind('/') + 2:]) if link else None
 
-    def print_commit(self, commit):
-        print(self.format_commit(commit))
+    def format_commit(self, commit, status=None):
+        diff_id = self.get_differential_id(commit)
+        diff_str = "D%s" % diff_id if diff_id else "N/A"
+
+        result = u"%s %s" % (commit.hexsha[:7], diff_str)
+        if status:
+            result += u" — %s%s%s" % (
+                Colors.OKGREEN if status == "Accepted" else Colors.WARNING,
+                status,
+                Colors.ENDC)
+
+        return result + u" — %s" % commit.summary
+
+    def print_commits(self, commits):
+        ids = []
+        for c in commits:
+            diffid = self.get_differential_id(c)
+            if diffid:
+                ids.append(diffid)
+
+        reply = self.conduit('differential.query', { "ids": ids })
+
+        if reply["error"]:
+            print("Could not get informations about differentials status")
+            statuses = None
+        else:
+            statuses = {}
+            for diff in reply["response"]:
+                statuses[int(diff["id"])] = diff["statusName"]
+
+        for c in commits:
+            status = None
+            if statuses:
+                status = statuses.get(self.get_differential_id(c),
+                                      "Not proposed yet")
+            print (self.format_commit(c, status))
 
     def conduit(self, cmd, params):
         data = bytes(json.dumps(params), 'utf-8')
@@ -319,8 +361,7 @@ class GitPhab:
                 self.die("'%s' is a merge commit. Aborting." % c.hexsha)
 
         # Ask confirmation before doing any harm
-        for c in commits:
-            self.print_commit(c)
+        self.print_commits(commits)
 
         if not self.task:
             if self.prompt("Create a task for above commits?"):
@@ -479,8 +520,7 @@ class GitPhab:
 
     def do_log(self):
         commits = self.get_commits()
-        for c in commits:
-            self.print_commit(c)
+        self.print_commits(commits)
 
     def do_fetch(self):
         branch = self.get_wip_branch()
