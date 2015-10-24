@@ -635,6 +635,7 @@ def DisabledCompleter(prefix, **kwargs):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Phabricator integration.')
     subparsers = parser.add_subparsers(dest='subparser_name')
+    subparsers.required = True
 
     attach_parser = subparsers.add_parser(
         'attach', help="Generate a Differential for each commit")
