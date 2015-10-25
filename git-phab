@@ -606,7 +606,7 @@ class GitPhab:
         reply = self.conduit('maniphest.query', {"ids": task_ids})
 
         for tphid, task in reply["response"].items():
-            if task["statusName"] != "Closed":
+            if not task["isClosed"]:
                 continue
 
             for branch, task_name in branch_task:
