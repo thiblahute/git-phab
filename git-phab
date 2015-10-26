@@ -633,13 +633,9 @@ class GitPhab:
             self.die("Repository is dirty. Aborting.")
 
         # Collect commits that will be pushed
-        commits = []
         output = self.repo.git.push(dry_run=True, porcelain=True)
-        for line in output.split('\n'):
-            m = re.fullmatch('.\t.*\t(.+\.\..+).*', line)
-            if m:
-                commits = self.get_commits(m.group(1))
-                break
+        m = re.search('[0-9a-z]+\.\.[0-9a-z]+', output)
+        commits = self.get_commits(m.group(0)) if m else []
 
         # Sanity checks
         if len(commits) == 0:
