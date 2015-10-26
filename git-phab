@@ -352,6 +352,11 @@ class GitPhab:
 
         return string
 
+    def guess_person(self, fullname):
+        output = self.repo.git.shortlog(summary=True, email=True, number=True)
+        m = re.search(re.escape(fullname) + ' <.*>$', output, re.MULTILINE)
+        return m.group(0) if m else fullname
+
     def do_attach(self):
         if self.repo.is_dirty():
             self.die("Repository is dirty. Aborting.")
@@ -696,8 +701,8 @@ class GitPhab:
                 if len(reviewers) > 0:
                     msg = self.repo.head.commit.message
                     for user in reply['response']:
-                        # FIXME: Sadly we don't have email
-                        msg += "Reviewed-by: " + user['realName']+"\n"
+                        person = self.guess_person(user['realName'])
+                        msg += "Reviewed-by: %s\n" % person
                     self.repo.git.commit(amend=True, message=msg)
 
             if orig_branch is not None:
