@@ -636,17 +636,16 @@ class GitPhab:
                 commits = self.get_commits(m.group(1))
                 break
 
+        # Sanity checks
         if len(commits) == 0:
             self.die("No commits to push. Aborting.")
-
         if commits[0] != self.repo.head.commit:
             self.die("Top commit to push is not HEAD.")
-
-        # Sanity checks
         for c in commits:
             if len(c.parents) > 1:
                 self.die("'%s' is a merge commit. Aborting." % c.hexsha)
 
+        # Ask confirmation
         self.print_commits(commits)
         if not self.prompt("Do you want to push above commits?"):
             print("Aborting")
@@ -658,15 +657,18 @@ class GitPhab:
         try:
             # Detach HEAD from the branch; this gives a cleaner reflog for the
             # branch
-            print("Moving to starting point")
             self.repo.head.reference = commits[-1].parents[0]
             self.repo.head.reset(index=True, working_tree=True)
             for commit in reversed(commits):
                 self.repo.git.cherry_pick(commit.hexsha)
+
+                # If the commit was not attached we have nothing to do with it
                 diffid = self.get_differential_id(commit)
                 if not diffid:
                     continue
 
+                # This seems to be the only way to get the Maniphest and
+                # reviewers of a differential.
                 reply = self.conduit('differential.getcommitmessage', {
                     'revision_id': diffid
                 })
@@ -685,6 +687,7 @@ class GitPhab:
                     for user in m.group(2).split(','):
                         reviewers.append(user.strip())
 
+                # Get extra info about reviewers
                 reply = self.conduit('user.query', {
                     'usernames': reviewers
                 })
@@ -692,9 +695,8 @@ class GitPhab:
                 # Rewrite commit message with "Reviewed-by:"
                 if len(reviewers) > 0:
                     msg = self.repo.head.commit.message
-                    if msg[-1] != '\n':
-                        msg += '\n'
                     for user in reply['response']:
+                        # FIXME: Sadly we don't have email
                         msg += "Reviewed-by: " + user['realName']+"\n"
                     self.repo.head.commit = self.repo.head.commit.parents[0]
                     self.repo.head.commit = self.repo.index.commit(msg)
@@ -711,15 +713,16 @@ class GitPhab:
             self.repo.head.reset(index=True, working_tree=True)
             raise
 
+        # Do the real push
         self.repo.git.push()
 
+        # Propose to close tasks
         for task in tasks:
             if self.prompt("Do you want to close '%s'?" % task):
                 self.conduit("maniphest.update", {
                     'id': int(task[1:]),
                     'status': 'resolved'
                 })
-                pass
 
     def run(self):
         self.validate_args()
