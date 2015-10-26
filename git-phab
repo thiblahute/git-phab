@@ -128,14 +128,14 @@ class GitPhab:
         m = re.fullmatch('(.+/)?(T[0-9]+)(-.*)?', bname)
         return m.group(2) if m else None
 
-    def get_commits(self):
+    def get_commits(self, revision_range):
         try:
             # See if the argument identifies a single revision
-            commits = [self.repo.rev_parse(self.revision_range)]
+            commits = [self.repo.rev_parse(revision_range)]
         except:
             # If not, assume the argument is a range
             try:
-                commits = list(self.repo.iter_commits(self.revision_range))
+                commits = list(self.repo.iter_commits(revision_range))
             except:
                 # If not again, the argument must be invalid — perhaps the user
                 # has accidentally specified a bug number but not a revision.
@@ -143,7 +143,7 @@ class GitPhab:
 
         if len(commits) == 0:
             self.die("'%s' does not name any commits. Use HEAD to specify "
-                     "just the last commit" % self.revision_range)
+                     "just the last commit" % revision_range)
 
         return commits
 
@@ -368,7 +368,7 @@ class GitPhab:
         summary = ""
 
         # Oldest commit is last in the list
-        commits = self.get_commits()
+        commits = self.get_commits(self.revision_range)
         s = commits[-1].hexsha + "^..HEAD"
         all_commits = list(self.repo.iter_commits(s))
 
@@ -541,7 +541,7 @@ class GitPhab:
         print(summary)
 
     def do_log(self):
-        commits = self.get_commits()
+        commits = self.get_commits(self.revision_range)
         self.print_commits(commits)
 
     def do_fetch(self):
@@ -622,6 +622,104 @@ class GitPhab:
                         self.repo.delete_head(branch, force=True)
 
                     print("  -> Branch %s was deleted" % branch.name)
+
+    def do_land(self):
+        if self.repo.is_dirty():
+            self.die("Repository is dirty. Aborting.")
+
+        # Collect commits that will be pushed
+        commits = []
+        output = self.repo.git.push(dry_run=True, porcelain=True)
+        for line in output.split('\n'):
+            m = re.fullmatch('.\t.*\t(.+\.\..+).*', line)
+            if m:
+                commits = self.get_commits(m.group(1))
+                break
+
+        if len(commits) == 0:
+            self.die("No commits to push. Aborting.")
+
+        if commits[0] != self.repo.head.commit:
+            self.die("Top commit to push is not HEAD.")
+
+        # Sanity checks
+        for c in commits:
+            if len(c.parents) > 1:
+                self.die("'%s' is a merge commit. Aborting." % c.hexsha)
+
+        self.print_commits(commits)
+        if not self.prompt("Do you want to push above commits?"):
+            print("Aborting")
+            exit(0)
+
+        orig_commit = self.repo.head.commit
+        orig_branch = self.repo.head.reference
+        tasks = set()
+        try:
+            # Detach HEAD from the branch; this gives a cleaner reflog for the
+            # branch
+            print("Moving to starting point")
+            self.repo.head.reference = commits[-1].parents[0]
+            self.repo.head.reset(index=True, working_tree=True)
+            for commit in reversed(commits):
+                self.repo.git.cherry_pick(commit.hexsha)
+                diffid = self.get_differential_id(commit)
+                if not diffid:
+                    continue
+
+                reply = self.conduit('differential.getcommitmessage', {
+                    'revision_id': diffid
+                })
+                msg = reply['response']
+
+                # Get tasks bound to this differential
+                m = re.search('(^Maniphest Tasks: )(.*)$', msg, re.MULTILINE)
+                if m:
+                    for task in m.group(2).split(','):
+                        tasks.add(task.strip())
+
+                # Get people who approved this differential
+                reviewers = []
+                m = re.search('(^Reviewed By: )(.*)$', msg, re.MULTILINE)
+                if m:
+                    for user in m.group(2).split(','):
+                        reviewers.append(user.strip())
+
+                reply = self.conduit('user.query', {
+                    'usernames': reviewers
+                })
+
+                # Rewrite commit message with "Reviewed-by:"
+                if len(reviewers) > 0:
+                    msg = self.repo.head.commit.message
+                    if msg[-1] != '\n':
+                        msg += '\n'
+                    for user in reply['response']:
+                        msg += "Reviewed-by: " + user['realName']+"\n"
+                    self.repo.head.commit = self.repo.head.commit.parents[0]
+                    self.repo.head.commit = self.repo.index.commit(msg)
+
+            if orig_branch is not None:
+                orig_branch.commit = self.repo.head.commit
+                self.repo.head.reference = orig_branch
+        except:
+            print("Cleaning up back to original state on error")
+            self.repo.head.commit = orig_commit
+            if orig_branch is not None:
+                orig_branch.commit = orig_commit
+                self.repo.head.reference = orig_branch
+            self.repo.head.reset(index=True, working_tree=True)
+            raise
+
+        self.repo.git.push()
+
+        for task in tasks:
+            if self.prompt("Do you want to close '%s'?" % task):
+                self.conduit("maniphest.update", {
+                    'id': int(task[1:]),
+                    'status': 'resolved'
+                })
+                pass
 
     def run(self):
         self.validate_args()
@@ -708,6 +806,9 @@ if __name__ == '__main__':
     clean_parser = subparsers.add_parser(
         'clean', help="Clean all branches for which the associated task"
         " has been closed")
+
+    land_parser = subparsers.add_parser(
+        'land', help="Run 'git push' but also close related tasks")
 
     argcomplete.autocomplete(parser)
 
