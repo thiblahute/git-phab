@@ -424,7 +424,7 @@ class GitPhab:
                     # phabricator fields are last, after all common git fields
                     # like 'Reviewed-by:', etc. Note that "Depends on" is not a
                     # field and is parsed from the body part.
-                    orig_commit = self.repo.head.commit
+                    cur_orig_commit = self.repo.head.commit
                     subject, body, fields = self.parse_commit_msg(
                         commit.message)
                     if last_revision_id:
@@ -448,7 +448,7 @@ class GitPhab:
                         print("Command '%s' failed. Finnish rebuilding branch "
                               "without proposing further patches" % arc_cmd)
                         arc_failed = True
-                        self.repo.head.commit = orig_commit
+                        self.repo.head.commit = cur_orig_commit
                         summary += "Failed proposing: %s -- " \
                             "NO MORE PATCH PROPOSED\n" % self.format_commit(
                                 self.repo.head.commit)
@@ -467,7 +467,7 @@ class GitPhab:
                     else:
                         summary += "Updated: "
 
-                    self.repo.head.commit = orig_commit
+                    self.repo.head.commit = cur_orig_commit
                     self.repo.git.commit(amend=True, message=msg)
 
                     last_revision_id = new_link.split("/")[-1]
