@@ -439,8 +439,7 @@ class GitPhab:
                     fields = '\n'.join(fields).strip()
                     msg = '\n\n'.join([subject, body, fields])
 
-                    self.repo.head.commit = self.repo.head.commit.parents[0]
-                    self.repo.head.commit = self.repo.index.commit(msg)
+                    self.repo.git.commit(amend=True, message=msg)
 
                     print("attach " + commit.hexsha)
                     try:
@@ -468,8 +467,9 @@ class GitPhab:
                     else:
                         summary += "Updated: "
 
-                    self.repo.head.commit = self.repo.head.commit.parents[0]
-                    self.repo.head.commit = self.repo.index.commit(msg)
+                    self.repo.head.commit = orig_commit
+                    self.repo.git.commit(amend=True, message=msg)
+
                     last_revision_id = new_link.split("/")[-1]
 
                     summary += self.format_commit(self.repo.head.commit) + "\n"
@@ -698,8 +698,7 @@ class GitPhab:
                     for user in reply['response']:
                         # FIXME: Sadly we don't have email
                         msg += "Reviewed-by: " + user['realName']+"\n"
-                    self.repo.head.commit = self.repo.head.commit.parents[0]
-                    self.repo.head.commit = self.repo.index.commit(msg)
+                    self.repo.git.commit(amend=True, message=msg)
 
             if orig_branch is not None:
                 orig_branch.commit = self.repo.head.commit
