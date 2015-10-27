@@ -567,13 +567,36 @@ class GitPhab:
         self.repo.git.fetch(remote, "%s" % branch)
 
         commit = self.repo.commit('FETCH_HEAD')
-        print("Commit %s from remote branch '%s' has been fetched" %
-              commit.hexsha, branch)
+        print("Commit '%s' from remote branch '%s' has been fetched" %
+              (commit.hexsha, branch))
 
         return (commit, branch)
 
     def do_fetch(self):
         commit, branch = self.fetch()
+
+    def do_checkout(self):
+        commit, remote_branch_name = self.fetch()
+
+        # Lookup for an existing branch for this task
+        branch = None
+        for b in self.repo.branches:
+            if self.task_from_branchname(b.name) == self.task:
+                branch = b
+                break
+
+        if branch:
+            if not self.prompt("Do you want to reset branch %s to %s?" %
+                               (branch.name, commit.hexsha)):
+                self.die("Aborting")
+            branch.commit = commit
+            print("Branch %s has been reset." % branch.name)
+        else:
+            name = remote_branch_name[remote_branch_name.rfind('/') + 1:]
+            branch = self.repo.create_head(name)
+            print("New branch %s has been created." % branch.name)
+
+        branch.checkout()
 
     def do_browse(self):
         urls = []
@@ -796,6 +819,13 @@ if __name__ == '__main__':
     fetch_parser.add_argument(
         'task', metavar='<T123>', nargs='?',
         help="The task to fetch") \
+        .completer = DisabledCompleter
+
+    checkout_parser = subparsers.add_parser(
+        'checkout', help="Checkout a task's branch")
+    checkout_parser.add_argument(
+        'task', metavar='<T123>', nargs='?',
+        help="The task to checkout") \
         .completer = DisabledCompleter
 
     browse_parser = subparsers.add_parser(
