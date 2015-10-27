@@ -357,6 +357,13 @@ class GitPhab:
         m = re.search(re.escape(fullname) + ' <.*>$', output, re.MULTILINE)
         return m.group(0) if m else fullname
 
+    def remove_ourself_from_reviewers(self):
+        reply = self.conduit("user.whoami", {})
+        username = reply['response']['userName']
+        reviewers = [r.strip() for r in self.reviewers.split(',')]
+        reviewers.remove(username)
+        self.reviewers = ','.join(reviewers)
+
     def do_attach(self):
         if self.repo.is_dirty():
             self.die("Repository is dirty. Aborting.")
@@ -369,6 +376,7 @@ class GitPhab:
                      % (self.branch_task, self.task))
 
         self.ensure_project_phids()
+        self.remove_ourself_from_reviewers()
 
         summary = ""
 
