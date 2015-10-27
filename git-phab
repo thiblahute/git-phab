@@ -417,14 +417,16 @@ class GitPhab:
         orig_commit = self.repo.head.commit
         orig_branch = self.repo.head.reference
 
-        options = ['--allow-untracked',
-                   '--config history.immutable=false',
+        arc_cmd = ['arc',
+                   'diff',
+                   '--allow-untracked',
+                   '--config', 'history.immutable=false',
                    '--verbatim']
         if self.reviewers:
-            options.append('--reviewers ' + self.reviewers)
+            arc_cmd.append('--reviewers=' + self.reviewers)
         if self.message:
-            options.append('--message "' + self.message + '"')
-        arc_cmd = 'arc diff %s HEAD~1' % (' '.join(options))
+            arc_cmd.append('--message=' + self.message)
+        arc_cmd.append('HEAD~1')
 
         arc_failed = False
         try:
@@ -462,7 +464,7 @@ class GitPhab:
 
                     print("attach " + commit.hexsha)
                     try:
-                        subprocess.check_call(arc_cmd, shell=True)
+                        subprocess.check_call(arc_cmd)
                     except:
                         print("Command '%s' failed. Finnish rebuilding branch "
                               "without proposing further patches" % arc_cmd)
@@ -779,7 +781,7 @@ if __name__ == '__main__':
     attach_parser = subparsers.add_parser(
         'attach', help="Generate a Differential for each commit")
     attach_parser.add_argument(
-        '--reviewers', '-r', metavar='<username1,username2,...>',
+        '--reviewers', '-r', metavar='<username1,#project2,...>',
         help="A list of reviewers") \
         .completer = DisabledCompleter
     attach_parser.add_argument(
