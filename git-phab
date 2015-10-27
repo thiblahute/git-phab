@@ -367,7 +367,7 @@ class GitPhab:
         reply = self.conduit("user.whoami", {})
         username = reply['response']['userName']
         reviewers = [r.strip() for r in self.reviewers.split(',')]
-        reviewers.remove(username)
+        reviewers = list(filter(lambda r: r != username, reviewers))
         self.reviewers = ','.join(reviewers)
 
     def do_attach(self):
