@@ -48,7 +48,6 @@ class GitPhab:
         self.remote = None
         self.assume_yes = False
         self.reviewers = None
-        self.remote_from_config = False
         self.projects = None
 
     # Copied from git-bz
@@ -252,7 +251,6 @@ class GitPhab:
 
         if not self.remote:
             self.remote = config_remote
-            self.remote_from_config = True
 
         # Validate that self.remote exists
         try:
@@ -557,24 +555,25 @@ class GitPhab:
         commits = self.get_commits(self.revision_range)
         self.print_commits(commits)
 
-    def do_fetch(self):
-        branch = self.get_wip_branch()
-        remote = self.remote
-
-        if self.remote_from_config:
-            try:
-                reply = self.conduit('maniphest.query', {
-                    "ids": [int(self.task[1:])]
-                })
-                props = list(reply['response'].values())[0]
-                uri = props['auxiliary']['std:maniphest:git:uri-branch']
-                remote, branch = uri.split('#')
-            except:
-                print("Couldn't get git URI from Maniphest")
+    def fetch(self):
+        reply = self.conduit('maniphest.query', {
+            "ids": [int(self.task[1:])]
+        })
+        props = list(reply['response'].values())[0]
+        uri = props['auxiliary']['std:maniphest:git:uri-branch']
+        remote, branch = uri.split('#')
 
         print("Git URI: %s, branch: %s" % (remote, branch))
-        self.repo.git.fetch(remote, "%s:%s" % (branch, self.task), force=True)
-        print("Branch %s created." % self.task)
+        self.repo.git.fetch(remote, "%s" % branch)
+
+        commit = self.repo.commit('FETCH_HEAD')
+        print("Commit %s from remote branch '%s' has been fetched" %
+              commit.hexsha, branch)
+
+        return (commit, branch)
+
+    def do_fetch(self):
+        commit, branch = self.fetch()
 
     def do_browse(self):
         urls = []
@@ -795,12 +794,7 @@ if __name__ == '__main__':
     fetch_parser = subparsers.add_parser(
         'fetch', help="Fetch a task's branch")
     fetch_parser.add_argument(
-        '--remote', metavar='<remote>',
-        help=("A remote repository to fetch from. "
-              "Overrides 'phab.remote' configuration.")) \
-        .completer = DisabledCompleter
-    fetch_parser.add_argument(
-        'task', metavar='<T123>',
+        'task', metavar='<T123>', nargs='?',
         help="The task to fetch") \
         .completer = DisabledCompleter
 
