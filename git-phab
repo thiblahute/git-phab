@@ -201,7 +201,15 @@ class GitPhab:
         return json.loads(output.decode('utf-8'))
 
     def get_wip_branch(self):
-        return "wip/phab/" + self.task
+        if self.repo.head.reference:
+            name = self.repo.head.reference.name
+            name = name[name.rfind('/') + 1:]
+            if not name.startswith(self.task):
+                name = self.task + '-' + name
+        else:
+            name = self.task
+
+        return "wip/phab/" + name
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
