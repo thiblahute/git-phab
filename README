@@ -8,6 +8,12 @@ Optionaly generate and copy or symlink manpage into your $MANPATH
   $ a2x --doctype manpage --format manpage git-phab.txt
   $ ln -s $PWD/git-phab.1 ~/.local/share/man/man1/
 
+Optionaly add this in ~/.bash_completion to enable bash completion:
+function _git_phab ()
+{
+  _python_argcomplete_global git-phab
+}
+
 REQUIREMENTS
 ============
 
