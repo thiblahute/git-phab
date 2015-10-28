@@ -365,6 +365,8 @@ class GitPhab:
         return m.group(0) if m else fullname
 
     def remove_ourself_from_reviewers(self):
+        if self.reviewers is None:
+            return
         reply = self.conduit("user.whoami", {})
         username = reply['response']['userName']
         reviewers = [r.strip() for r in self.reviewers.split(',')]
