@@ -201,16 +201,18 @@ class GitPhab:
                                          shell=True)
         return json.loads(output.decode('utf-8'))
 
-    def get_wip_branch(self):
-        if self.repo.head.reference:
-            name = self.repo.head.reference.name
-            name = name[name.rfind('/') + 1:]
-            if not name.startswith(self.task):
-                name = self.task + '-' + name
-        else:
-            name = self.task
+    def branch_name_with_task(self):
+        if self.branch_name.startswith(self.task):
+            return self.branch_name
 
-        return "wip/phab/" + name
+        name = self.task
+        if self.branch_name not in ["master"]:
+            name += '-' + self.branch_name
+
+        return name
+
+    def get_wip_branch(self):
+        return "wip/phab/" + self.branch_name_with_task()
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
@@ -565,10 +567,7 @@ class GitPhab:
                     summary += "Branch %s reset to %s" % \
                                (branch.name, branch.commit)
             else:
-                new_bname = self.task
-                if self.branch_name not in ["master"]:
-                    new_bname += '-' + self.branch_name
-
+                new_bname = self.branch_name_with_task()
                 if self.prompt('Create and checkout a new branch called: %s?' %
                                new_bname):
                     new_branch = self.repo.create_head(new_bname)
