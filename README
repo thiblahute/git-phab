@@ -2,7 +2,11 @@ INSTALL
 =======
 
 Copy or symlink executables into your $PATH.
-  ln -s $PWD/git-phab ~/.local/bin/
+  $ ln -s $PWD/git-phab ~/.local/bin/
+
+Optionaly generate and copy or symlink manpage into your $MANPATH
+  $ a2x --doctype manpage --format manpage git-phab.txt
+  $ ln -s $PWD/git-phab.1 ~/.local/share/man/man1/
 
 REQUIREMENTS
 ============
@@ -16,6 +20,5 @@ DESCRIPTION
 
 Git subcommand to integrate with phabricator.
 
-To generate manpage:
-  $ a2x --doctype manpage --format manpage git-phab.txt
+See the manpage for more details:
   $ man ./git-phab.1
