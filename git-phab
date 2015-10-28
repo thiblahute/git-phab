@@ -267,10 +267,20 @@ class GitPhab:
         except:
             self.die("%s not a valid remote. Aborting." % self.remote)
 
+        # Get remote's fetch URL. Unfortunately we can't get it from config
+        # using remote.config_reader.get('url') otherwise it won't rewrite the
+        # URL using url.*.insteadOf configs.
+        try:
+            output = self.repo.git.remote('show', '-n', self.remote)
+            m = re.search('Fetch URL: (.*)$', output, re.MULTILINE)
+            self.remote_url = m.group(1)
+        except:
+            self.die("Failed to get fetch URL for remote %s" % self.remote)
+
         # Make sure the user knows what he's doing if the remote's fetch URL is
         # using ssh, otherwise reviewers might not be able to pull their
         # branch.
-        url = urlsplit(remote.config_reader.get('url'))
+        url = urlsplit(self.remote_url)
         if url.scheme in ["ssh", "git+ssh"]:
             try:
                 force_ssh = self.repo.config_reader().get_value(
@@ -292,7 +302,9 @@ class GitPhab:
                     fetchurl = urlunsplit(url._replace(scheme='git'))
                     self.die("To reconfigure your remote, run:\n"
                              "  git remote set-url {0} {1}\n"
-                             "  git remote set-url --push {0} {2}"
+                             "  git remote set-url --push {0} {2}\n"
+                             "Note that if you're using url.*.insteadOf you "
+                             "could define url.*.pushInsteadOf as well."
                              .format(self.remote, fetchurl, pushurl))
 
         # Try to guess the task from branch name
@@ -523,7 +535,7 @@ class GitPhab:
                     remote.push('HEAD:refs/heads/' + branch, force=True)
                     summary += "Branch pushed to %s/%s\n" % (remote, branch)
 
-                uri = "%s#%s" % (remote.config_reader.get('url'), branch)
+                uri = "%s#%s" % (self.remote_url, branch)
                 try:
                     self.conduit('maniphest.update', {
                         "id": int(self.task[1:]),
