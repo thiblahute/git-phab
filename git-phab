@@ -84,7 +84,7 @@ class GitPhab:
         process = subprocess.Popen(editor + " " + filename, shell=True)
         process.wait()
         if process.returncode != 0:
-            die("Editor exited with non-zero return code")
+            self.die("Editor exited with non-zero return code")
 
     # Copied from git-bz
     def edit_template(self, template):
@@ -264,7 +264,7 @@ class GitPhab:
 
         # Validate that self.remote exists
         try:
-            remote = self.repo.remote(self.remote)
+            self.repo.remote(self.remote)
         except:
             self.die("%s not a valid remote. Aborting." % self.remote)
 
@@ -608,9 +608,15 @@ class GitPhab:
         return (commit, branch)
 
     def do_fetch(self):
-        commit, branch = self.fetch()
+        if not self.task:
+            self.die("No task provided. Aborting.")
+
+        self.fetch()
 
     def do_checkout(self):
+        if not self.task:
+            self.die("No task provided. Aborting.")
+
         commit, remote_branch_name = self.fetch()
 
         # Lookup for an existing branch for this task
