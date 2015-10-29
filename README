@@ -8,17 +8,22 @@ Optionaly generate and copy or symlink manpage into your $MANPATH
   $ a2x --doctype manpage --format manpage git-phab.txt
   $ ln -s $PWD/git-phab.1 ~/.local/share/man/man1/
 
-Optionaly add this in ~/.bash_completion to enable bash completion:
-function _git_phab ()
-{
-  _python_argcomplete_global git-phab
-}
+Optionaly enable bash completion:
+  $ sudo activate-global-python-argcomplete3
+And add this in your ~/.bash_completion:
+  function _git_phab()
+  {
+    COMP_WORDS=(git-phab ${COMP_WORDS[@]:2})
+    COMP_CWORD=$((COMP_CWORD - 1))
+    COMP_LINE=${COMP_LINE/git phab/git-phab}
+    _python_argcomplete_global git-phab
+  }
 
 REQUIREMENTS
 ============
 
  - pip3 install GitPython
- - python3-argcomplete
+ - pip3 install argcomplete
  - arcanist
 
 DESCRIPTION
