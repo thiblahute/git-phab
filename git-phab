@@ -226,7 +226,6 @@ class GitPhab:
 
         try:
             self.phabricator_uri = self.arcconfig["phabricator.uri"]
-            self.default_project = self.arcconfig["project"]
         except KeyError as e:
             self.die("Could not find '%s' in .arcconfig.\n"
                      "Make sure the current repository is properly configured "
@@ -339,8 +338,18 @@ class GitPhab:
             self.reviewers = self.arcconfig.get("default-reviewers")
 
         self.projects = self.projects.split(',') if self.projects else []
-        self.projects.append(self.default_project)
-        self.projects = [s.lower() for s in self.projects]
+        if "project" in self.arcconfig:
+            self.projects.append(self.arcconfig["project"])
+        if "project.name" in self.arcconfig:
+            self.projects.append(self.arcconfig["project.name"])
+        if "projects" in self.arcconfig:
+            for p in self.arcconfig["projects"].split(','):
+                self.projects.append(p)
+        self.projects = [s.strip().lower() for s in self.projects]
+        if len(self.projects) == 0:
+            self.die("No project has been defined.\n"
+                     "You can add 'projects': 'p1, p2' in your .arcconfig\n"
+                     "Aborting.")
 
     def parse_commit_msg(self, msg):
         subject = None
