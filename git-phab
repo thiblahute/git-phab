@@ -628,7 +628,7 @@ class GitPhab:
             print("Branch %s has been reset." % branch.name)
         else:
             name = remote_branch_name[remote_branch_name.rfind('/') + 1:]
-            branch = self.repo.create_head(name)
+            branch = self.repo.create_head(name, commit=commit)
             print("New branch %s has been created." % branch.name)
 
         branch.checkout()
