@@ -31,5 +31,56 @@ DESCRIPTION
 
 Git subcommand to integrate with phabricator.
 
-See the manpage for more details:
-  $ man ./git-phab.1
+WORKFLOW EXAMPLE
+================
+
+First, configure where to push WIP branches:
+  $ git config phab.remote xclaesse
+
+Before starting your work, create a branch:
+  $ git checkout -b fix-bugs origin/master
+  Branch fix-bugs set up to track remote branch master from origin.
+  Switched to a new branch 'fix-bugs'
+Note that is it important to set the tracking remote branch, git-phab will use
+it to set the default commit range to attach.
+
+Now fix your bugs...
+
+When the branch is ready for review, attach it:
+  $ git phab attach
+  Using revision range 'origin/master..'
+  a3beba9 — Not attached — Truncate all_commits when filtering already proposed commits
+  Create a task for above commits? [yn] y
+  Attach above commits to task T3436? [yn] y
+  (...)
+  Push HEAD to xclaesse/wip/phab/T3436-fix-bugs? [yn] y
+  Create and checkout a new branch called: T3436-fix-bugs? [yn] y
+
+  Summary:
+  New: task T3436
+  New: 66b48b9 — D483 — Truncate all_commits when filtering already proposed commits
+  Branch pushed to xclaesse/wip/phab/T3436-fix-bugs
+  Branch T3436-fix-bugs created and checked out
+Note that the current branch name wasn't starting with a task ID, so it proposed
+to create a new one. If you already had a task for it, just pass `--task`
+option. But it created a new branch prefixed with the task ID so future git-phab
+commands will know which task this branch refers to:
+  $ git branch
+  * T3436-fix-bugs
+    fix-bugs
+    master
+
+When your commits have been accepted, merge them:
+  $ git checkout master
+  $ git merge T3436-fix-bugs
+  $ git phab land
+  66b48b9 — D483 Accepted — Truncate all_commits when filtering already proposed commits
+  Do you want to push above commits? [yn] y
+  Do you want to close 'T3436'? [yn] y
+
+You can now cleanup your branches:
+  $ git phab clean
+  Task 'T3436' has been closed, do you want to delete branch 'T3436-fix-bugs'? [yn] y
+    -> Branch T3436-fix-bugs was deleted
+  Task 'T3436' has been closed, do you want to delete branch 'xclaesse/wip/phab/T3436-fix-a-bug'? [yn] y
+    -> Branch xclaesse/wip/phab/T3436-fix-a-bug was deleted
