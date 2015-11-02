@@ -214,27 +214,24 @@ class GitPhab:
     def get_wip_branch(self):
         return "wip/phab/" + self.branch_name_with_task()
 
-    def filter_already_proposed_commits(self, commits):
+    def filter_already_proposed_commits(self, commits, all_commits):
         if not self.task:
-            return commits
+            return
 
         # Fetch what has already been proposed on the task
         try:
             fetch_head, branch = self.fetch()
         except:
-            return commits
+            return
 
         common_ancestor = self.repo.git.merge_base(fetch_head.hexsha,
                                                    commits[0].hexsha)
-        common_ancestor = self.repo.commit(common_ancestor)
-        common_ancestor_idx = commits.index(common_ancestor)
-        if common_ancestor_idx >= 0:
+        idx = commits.index(self.repo.commit(common_ancestor))
+        if idx >= 0:
             print("Excluding already proposed commits %s..%s" % (
-                  commits[common_ancestor_idx].hexsha[:7],
-                  commits[-1].hexsha[:7]))
-            commits = commits[:common_ancestor_idx]
-
-        return commits
+                  commits[idx].hexsha[:7], commits[-1].hexsha[:7]))
+            del commits[idx:]
+            del all_commits[all_commits.index(commits[-1]) + 1:]
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
@@ -436,10 +433,6 @@ class GitPhab:
 
         # Oldest commit is last in the list
         commits = self.get_commits(self.revision_range)
-        commits = self.filter_already_proposed_commits(commits)
-        if not commits:
-            print("Everything has already been proposed")
-            return
         s = commits[-1].hexsha + "^..HEAD"
         all_commits = list(self.repo.iter_commits(s))
 
@@ -449,6 +442,11 @@ class GitPhab:
                 self.die("'%s' is not in current tree. Aborting." % c.hexsha)
             if len(c.parents) > 1:
                 self.die("'%s' is a merge commit. Aborting." % c.hexsha)
+
+        self.filter_already_proposed_commits(commits, all_commits)
+        if not commits:
+            print("Everything has already been proposed")
+            return
 
         # Ask confirmation before doing any harm
         self.print_commits(commits)
