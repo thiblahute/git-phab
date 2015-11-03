@@ -251,12 +251,15 @@ class GitPhab:
 
         common_ancestor = self.repo.git.merge_base(fetch_head.hexsha,
                                                    commits[0].hexsha)
-        idx = commits.index(self.repo.commit(common_ancestor))
-        if idx >= 0:
+        common_commit = self.repo.commit(common_ancestor)
+        commits_idx = commits.index(common_commit)
+        all_commits_idx = all_commits.index(common_commit)
+
+        if commits_idx >= 0:
             print("Excluding already proposed commits %s..%s" % (
-                  commits[idx].hexsha[:7], commits[-1].hexsha[:7]))
-            del commits[idx:]
-            del all_commits[all_commits.index(commits[-1]) + 1:]
+                  commits[commits_idx].hexsha[:7], commits[-1].hexsha[:7]))
+            del commits[commits_idx:]
+            del all_commits[all_commits_idx:]
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
