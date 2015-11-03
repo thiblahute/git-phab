@@ -328,7 +328,9 @@ class GitPhab:
                              .format(self.remote, fetchurl, pushurl))
 
         # Try to guess the task from branch name
-        self.branch_name = str(self.repo.head.reference)
+        if self.repo.head.is_detached:
+            self.die("HEAD is currently detached. Aborting.")
+        self.branch_name = self.repo.head.reference.name
         self.branch_task = self.task_from_branchname(self.branch_name)
 
         if not self.task:
@@ -549,15 +551,13 @@ class GitPhab:
                     print("pick " + commit.hexsha)
                     summary += "Picked: %s\n" % self.format_commit(commit)
 
-            if orig_branch is not None:
-                orig_branch.commit = self.repo.head.commit
-                self.repo.head.reference = orig_branch
+            orig_branch.commit = self.repo.head.commit
+            self.repo.head.reference = orig_branch
         except:
             print("Cleaning up back to original state on error")
             self.repo.head.commit = orig_commit
-            if orig_branch is not None:
-                orig_branch.commit = orig_commit
-                self.repo.head.reference = orig_branch
+            orig_branch.commit = orig_commit
+            self.repo.head.reference = orig_branch
             self.repo.head.reset(index=True, working_tree=True)
             raise
 
@@ -795,15 +795,13 @@ class GitPhab:
                         msg += "Reviewed-by: %s\n" % person
                     self.repo.git.commit(amend=True, message=msg)
 
-            if orig_branch is not None:
-                orig_branch.commit = self.repo.head.commit
-                self.repo.head.reference = orig_branch
+            orig_branch.commit = self.repo.head.commit
+            self.repo.head.reference = orig_branch
         except:
             print("Cleaning up back to original state on error")
             self.repo.head.commit = orig_commit
-            if orig_branch is not None:
-                orig_branch.commit = orig_commit
-                self.repo.head.reference = orig_branch
+            orig_branch.commit = orig_commit
+            self.repo.head.reference = orig_branch
             self.repo.head.reset(index=True, working_tree=True)
             raise
 
