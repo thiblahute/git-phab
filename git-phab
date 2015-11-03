@@ -201,12 +201,37 @@ class GitPhab:
                                          shell=True)
         return json.loads(output.decode('utf-8'))
 
+    def in_feature_branch(self):
+        # If current branch is "master" it's obviously not a feature branch.
+        if self.branch_name in ['master']:
+            return False
+
+        tracking = self.repo.head.reference.tracking_branch()
+
+        # If current branch is not tracking any remote branch it's probably
+        # a feature branch.
+        if not tracking or not tracking.is_remote():
+            return True
+
+        # If the tracking remote branch has a different name we can assume
+        # it's a feature branch (e.g. 'my-branch' is tracking 'origin/master')
+        if tracking.remote_head != self.branch_name:
+            return True
+
+        # The current branch has the same name than its tracking remote branch
+        # (e.g. "gnome-3-18" tracking "origin/gnome-3-18"). It's probably not
+        # a feature branch.
+        return False
+
     def branch_name_with_task(self):
         if self.branch_name.startswith(self.task):
             return self.branch_name
 
         name = self.task
-        if self.branch_name not in ["master"]:
+
+        # Only append current branch name if it seems to be a feature branch.
+        # We want "T123-fix-a-bug" but not "T123-master" or "T123-gnome-3-18".
+        if self.in_feature_branch():
             name += '-' + self.branch_name
 
         return name
@@ -593,6 +618,8 @@ class GitPhab:
                     break
 
             if branch:
+                # There is a branch corresponding to our task, but it's not the
+                # current branch. It's weird case that should rarely happen.
                 if self.prompt('Reset branch %s to what has just been sent '
                                'to phabricator?' % branch.name):
                     branch.commit = self.repo.head.commit
@@ -600,11 +627,20 @@ class GitPhab:
                                (branch.name, branch.commit)
             else:
                 new_bname = self.branch_name_with_task()
-                if self.prompt('Create and checkout a new branch called: %s?' %
-                               new_bname):
-                    new_branch = self.repo.create_head(new_bname)
-                    new_branch.checkout()
-                    summary += "Branch %s created and checked out" % new_bname
+                if self.in_feature_branch():
+                    if self.prompt("Rename current branch to '%s'?" %
+                                   new_bname):
+                        self.repo.head.reference.rename(new_bname)
+                        summary += "Branch renamed to %s" % new_bname
+                else:
+                    # Current branch is probably something like 'master' or
+                    # 'gnome-3-18', better create a new branch than renaming.
+                    if self.prompt("Create and checkout a new branch called: "
+                                   "'%s'?" % new_bname):
+                        new_branch = self.repo.create_head(new_bname)
+                        new_branch.checkout()
+                        summary += "Branch %s created and checked out" % \
+                                   new_bname
 
         print("\n\nSummary:")
         print(summary)
