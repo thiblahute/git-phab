@@ -56,19 +56,14 @@ class GitPhab:
         print(message, file=sys.stderr)
         sys.exit(1)
 
-    # Copied from git-bz
     def prompt(self, message):
+        if self.assume_yes:
+            print(message + " [yn] y")
+            return True
+
         try:
             while True:
-                # Using print here could result in Python adding a stray space
-                # before the next print
-                sys.stdout.write(message + " [yn] ")
-                if self.assume_yes:
-                    sys.stdout.write("y\n")
-                    sys.stdout.flush()
-                    return True
-                sys.stdout.flush()
-                line = sys.stdin.readline().strip()
+                line = input(message + " [yn] ")
                 if line == 'y' or line == 'Y':
                     return True
                 elif line == 'n' or line == 'N':
