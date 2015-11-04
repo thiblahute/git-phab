@@ -238,23 +238,24 @@ class GitPhab:
         if not self.task:
             return
 
-        # Fetch what has already been proposed on the task
         try:
+            # Fetch what has already been proposed on the task
             fetch_head, branch = self.fetch()
+
+            # Get the index in commits and all_commits lists of the common
+            # ancestor between HEAD and what has already been proposed.
+            common_ancestor = self.repo.git.merge_base(fetch_head.hexsha,
+                                                       commits[0].hexsha)
+            common_commit = self.repo.commit(common_ancestor)
+            commits_idx = commits.index(common_commit)
+            all_commits_idx = all_commits.index(common_commit)
         except:
             return
 
-        common_ancestor = self.repo.git.merge_base(fetch_head.hexsha,
-                                                   commits[0].hexsha)
-        common_commit = self.repo.commit(common_ancestor)
-        commits_idx = commits.index(common_commit)
-        all_commits_idx = all_commits.index(common_commit)
-
-        if commits_idx >= 0:
-            print("Excluding already proposed commits %s..%s" % (
-                  commits[-1].hexsha[:7], commits[commits_idx].hexsha[:7]))
-            del commits[commits_idx:]
-            del all_commits[all_commits_idx:]
+        print("Excluding already proposed commits %s..%s" % (
+              commits[-1].hexsha[:7], commits[commits_idx].hexsha[:7]))
+        del commits[commits_idx:]
+        del all_commits[all_commits_idx:]
 
     def read_arcconfig(self):
         path = os.path.join(self.repo.working_tree_dir, '.arcconfig')
