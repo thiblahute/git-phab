@@ -2,7 +2,7 @@
   "linters": {
     "pep8-default": {
       "type": "pep8",
-      "include": "(^git-)"
+      "include": "(^git-phab$)"
     }
   }
 }
