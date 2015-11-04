@@ -431,10 +431,17 @@ class GitPhab:
 
         return string
 
-    def guess_person(self, fullname):
+    def format_user(self, fullname):
         output = self.repo.git.shortlog(summary=True, email=True, number=True)
         m = re.search(re.escape(fullname) + ' <.*>$', output, re.MULTILINE)
-        return m.group(0) if m else fullname
+        if m:
+            return m.group(0)
+
+        email = input("Please enter email address for %s: " % fullname).strip()
+        if len(email) > 0:
+            return "%s <%s>" % (fullname, email)
+
+        return None
 
     def remove_ourself_from_reviewers(self):
         if self.reviewers is None:
@@ -830,9 +837,11 @@ class GitPhab:
                 if len(reviewers) > 0:
                     msg = self.repo.head.commit.message
                     for user in reply['response']:
-                        person = self.guess_person(user['realName'])
-                        msg += "Reviewed-by: %s\n" % person
-                    self.repo.git.commit(amend=True, message=msg)
+                        person = self.format_user(user['realName'])
+                        if person:
+                            msg += "Reviewed-by: %s\n" % person
+                    if msg != self.repo.head.commit.message:
+                        self.repo.git.commit(amend=True, message=msg)
 
             orig_branch.commit = self.repo.head.commit
             self.repo.head.reference = orig_branch
