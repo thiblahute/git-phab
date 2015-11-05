@@ -18,7 +18,7 @@ SYNOPSIS
 'git phab checkout' [-h] [<T123>]
 'git phab browse' [-h] [objects [objects ...]]
 'git phab clean' [-h]
-'git phab land' [-h]
+'git phab land' [-h] [--no-push]
 
 DESCRIPTION
 -----------
