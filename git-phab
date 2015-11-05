@@ -396,36 +396,70 @@ class GitPhab:
                      "You can add 'projects': 'p1, p2' in your .arcconfig\n"
                      "Aborting.")
 
+    def line_in_headers(self, line, headers):
+        for header in headers:
+            if re.match('^' + re.escape(header), line, flags=re.I):
+                return True
+        return False
+
     def parse_commit_msg(self, msg):
         subject = None
         body = []
-        fields = []
+        git_fields = []
+        phab_fields = []
 
-        for line in msg.split('\n'):
+        # Those are common one-line git field headers
+        git_headers = ['Signed-off-by:', 'Acked-by:', 'Reported-by:',
+                       'Tested-by:', 'Reviewed-by:']
+        # Those are understood by Phabricator
+        phab_headers = ['Cc:', 'differential revision:']
+
+        for line in msg.splitlines():
             if not subject:
                 subject = line
-            elif line.startswith('Differential Revision: '):
-                fields.append(line)
-            else:
-                body.append(line)
+                continue
 
-        return subject, body, fields
+            if self.line_in_headers(line, git_headers):
+                git_fields.append(line)
+                continue
 
-    def replace_fields(self, string):
+            if self.line_in_headers(line, phab_headers):
+                phab_fields.append(line)
+                continue
+
+            body.append(line)
+
+        return subject, body, git_fields + phab_fields
+
+    def format_commit_msg(self, subject, body, fields, ask=False):
         # This is the list of fields phabricator will search by default in
-        # commit messages. Case insensitive.
-        fields = ['title:', 'summary:', 'test plan:', 'testplan:', 'tested:',
-                  'tests:', 'reviewer:', 'reviewers:', 'reviewed by:', 'cc:',
-                  'ccs:', 'subscriber:', 'subscribers:', 'project:',
-                  'projects:', 'maniphest task:', 'maniphest tasks:',
-                  'differential revision:', 'conflicts:', 'git-svn-id:',
-                  'auditors:']
+        # commit message, case insensitive. It will confuse phabricator's
+        # parser if they appear in the subject or body of the commit message.
+        blacklist = ['title:', 'summary:', 'test plan:', 'testplan:',
+                     'tested:', 'tests:', 'reviewer:', 'reviewers:',
+                     'reviewed by:', 'cc:', 'ccs:', 'subscriber:',
+                     'subscribers:', 'project:', 'projects:',
+                     'maniphest task:', 'maniphest tasks:',
+                     'differential revision:', 'conflicts:', 'git-svn-id:',
+                     'auditors:']
 
-        for field in fields:
-            field_ = field[:-1] + '_:'
-            string = re.sub(field, field_, string, flags=re.I)
+        subject = subject.strip()
+        body = '\n'.join(body).strip()
+        fields = '\n'.join(fields).strip()
 
-        return string
+        for header in blacklist:
+            header_ = header[:-1] + '_:'
+            s = re.sub(re.escape(header), header_, subject, flags=re.I)
+            b = re.sub(re.escape(header), header_, body, flags=re.I)
+            if (s != subject or b != body) and (not ask or
+               self.prompt("Commit message contains '%s'.\n"
+                           "It could confuse phabricator's parser.\n"
+                           "Do you want to prefix is with an underscore?" %
+                           header)):
+                subject = s
+                body = b
+
+        return '\n\n'.join([subject, body, fields])
 
     def format_user(self, fullname):
         output = self.repo.git.shortlog(summary=True, email=True, number=True)
@@ -438,6 +472,39 @@ class GitPhab:
             return "%s <%s>" % (fullname, email)
 
         return None
+
+    def get_reviewers_and_tasks(self, commit):
+        reviewers = []
+        tasks = []
+
+        diffid = self.get_differential_id(commit)
+        if not diffid:
+            return reviewers, tasks
+
+        # This seems to be the only way to get the Maniphest and
+        # reviewers of a differential.
+        reply = self.conduit('differential.getcommitmessage', {
+            'revision_id': diffid
+        })
+        msg = reply['response']
+
+        # Get tasks bound to this differential
+        m = re.search('^Maniphest Tasks: (.*)$', msg, re.MULTILINE)
+        tasks = [t.strip() for t in m.group(1).split(',')] if m else []
+
+        # Get people who approved this differential
+        m = re.search('^Reviewed By: (.*)$', msg, re.MULTILINE)
+        usernames = [r.strip() for r in m.group(1).split(',')] if m else []
+        if usernames:
+            reply = self.conduit('user.query', {
+                'usernames': usernames
+            })
+            for user in reply['response']:
+                person = self.format_user(user['realName'])
+                if person:
+                    reviewers.append(person)
+
+        return reviewers, tasks
 
     def remove_ourself_from_reviewers(self):
         if self.reviewers is None:
@@ -529,7 +596,6 @@ class GitPhab:
                     # phabricator fields are last, after all common git fields
                     # like 'Reviewed-by:', etc. Note that "Depends on" is not a
                     # field and is parsed from the body part.
-                    cur_orig_commit = self.repo.head.commit
                     subject, body, fields = self.parse_commit_msg(
                         commit.message)
                     last_revision_id = self.get_differential_id(
@@ -540,12 +606,9 @@ class GitPhab:
                         fields.append("Maniphest Tasks: %s" % self.task)
                     fields.append("Projects: %s" %
                                   ','.join(self.project_phids))
+                    msg = self.format_commit_msg(subject, body, fields)
 
-                    subject = self.replace_fields(subject.strip())
-                    body = self.replace_fields('\n'.join(body).strip())
-                    fields = '\n'.join(fields).strip()
-                    msg = '\n\n'.join([subject, body, fields])
-
+                    cur_orig_commit = self.repo.head.commit
                     self.repo.git.commit(amend=True, message=msg)
 
                     print("attach " + commit.hexsha)
@@ -790,7 +853,7 @@ class GitPhab:
 
         orig_commit = self.repo.head.commit
         orig_branch = self.repo.head.reference
-        tasks = set()
+        all_tasks = []
         try:
             # Detach HEAD from the branch; this gives a cleaner reflog for the
             # branch
@@ -799,45 +862,23 @@ class GitPhab:
             for commit in reversed(commits):
                 self.repo.git.cherry_pick(commit.hexsha)
 
-                # If the commit was not attached we have nothing to do with it
-                diffid = self.get_differential_id(commit)
-                if not diffid:
-                    continue
+                reviewers, tasks = self.get_reviewers_and_tasks(commit)
+                all_tasks += tasks
 
-                # This seems to be the only way to get the Maniphest and
-                # reviewers of a differential.
-                reply = self.conduit('differential.getcommitmessage', {
-                    'revision_id': diffid
-                })
-                msg = reply['response']
+                # Rewrite commit message:
+                # - Add "Reviewed-by:" line
+                # - Ensure body doesn't contain blacklisted words
+                # - Ensure phabricator fields are last to make its parser happy
+                subject, body, fields = self.parse_commit_msg(
+                    self.repo.head.commit.message)
 
-                # Get tasks bound to this differential
-                m = re.search('(^Maniphest Tasks: )(.*)$', msg, re.MULTILINE)
-                if m:
-                    for task in m.group(2).split(','):
-                        tasks.add(task.strip())
+                for r in reviewers:
+                    # Note that we prepend here to make sur phab fields
+                    # stay last.
+                    fields.prepend("Reviewed-by: " + r)
 
-                # Get people who approved this differential
-                reviewers = []
-                m = re.search('(^Reviewed By: )(.*)$', msg, re.MULTILINE)
-                if m:
-                    for user in m.group(2).split(','):
-                        reviewers.append(user.strip())
-
-                # Get extra info about reviewers
-                reply = self.conduit('user.query', {
-                    'usernames': reviewers
-                })
-
-                # Rewrite commit message with "Reviewed-by:"
-                if len(reviewers) > 0:
-                    msg = self.repo.head.commit.message
-                    for user in reply['response']:
-                        person = self.format_user(user['realName'])
-                        if person:
-                            msg += "Reviewed-by: %s\n" % person
-                    if msg != self.repo.head.commit.message:
-                        self.repo.git.commit(amend=True, message=msg)
+                msg = self.format_commit_msg(subject, body, fields, True)
+                self.repo.git.commit(amend=True, message=msg)
 
             orig_branch.commit = self.repo.head.commit
             self.repo.head.reference = orig_branch
@@ -856,7 +897,7 @@ class GitPhab:
         self.repo.git.push()
 
         # Propose to close tasks
-        for task in tasks:
+        for task in set(all_tasks):
             if self.prompt("Do you want to close '%s'?" % task):
                 self.conduit("maniphest.update", {
                     'id': int(task[1:]),
