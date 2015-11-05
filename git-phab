@@ -70,8 +70,8 @@ class GitPhab:
                     return False
         except KeyboardInterrupt:
             # Ctrl+C doesn’t cause a newline
-            sys.stdout.write("\n")
-            return False
+            print("")
+            sys.exit(1)
 
     # Copied from git-bz
     def edit_file(self, filename):
