@@ -849,6 +849,9 @@ class GitPhab:
             self.repo.head.reset(index=True, working_tree=True)
             raise
 
+        if self.no_push:
+            return
+
         # Do the real push
         self.repo.git.push()
 
@@ -954,6 +957,10 @@ if __name__ == '__main__':
 
     land_parser = subparsers.add_parser(
         'land', help="Run 'git push' but also close related tasks")
+    land_parser.add_argument(
+        '--no-push', action="store_true",
+        help="Only rewrite commit messages but do not push.") \
+        .completer = DisabledCompleter
 
     argcomplete.autocomplete(parser)
 
