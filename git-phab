@@ -875,7 +875,7 @@ class GitPhab:
                 for r in reviewers:
                     # Note that we prepend here to make sur phab fields
                     # stay last.
-                    fields.prepend("Reviewed-by: " + r)
+                    fields.insert(0, "Reviewed-by: " + r)
 
                 msg = self.format_commit_msg(subject, body, fields, True)
                 self.repo.git.commit(amend=True, message=msg)
