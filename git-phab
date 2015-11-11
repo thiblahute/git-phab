@@ -238,13 +238,25 @@ class GitPhab:
         if not self.task:
             return
 
+        remote_commit = None
+
+        # Check if we already have a branch for current task on our remote
+        remote = self.repo.remote(self.remote)
+        bname = self.get_wip_branch()
+        for r in remote.refs:
+            if r.remote_head == bname:
+                remote_commit = r.commit
+                break
+
         try:
-            # Fetch what has already been proposed on the task
-            fetch_head, branch = self.fetch()
+            # Fetch what has already been proposed on the task if we don't have
+            # it locally yet.
+            if not remote_commit:
+                remote_commit = self.fetch()[0]
 
             # Get the index in commits and all_commits lists of the common
             # ancestor between HEAD and what has already been proposed.
-            common_ancestor = self.repo.git.merge_base(fetch_head.hexsha,
+            common_ancestor = self.repo.git.merge_base(remote_commit.hexsha,
                                                        commits[0].hexsha)
             common_commit = self.repo.commit(common_ancestor)
             commits_idx = commits.index(common_commit)
