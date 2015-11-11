@@ -707,7 +707,11 @@ class GitPhab:
                     if self.prompt("Create and checkout a new branch called: "
                                    "'%s'?" % new_bname):
                         new_branch = self.repo.create_head(new_bname)
+                        tracking = self.repo.head.reference.tracking_branch()
+                        if tracking:
+                            new_branch.set_tracking_branch(tracking)
                         new_branch.checkout()
+
                         summary += "Branch %s created and checked out\n" % \
                                    new_bname
 
