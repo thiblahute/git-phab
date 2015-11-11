@@ -692,7 +692,7 @@ class GitPhab:
                 if self.prompt('Reset branch %s to what has just been sent '
                                'to phabricator?' % branch.name):
                     branch.commit = self.repo.head.commit
-                    summary += "Branch %s reset to %s" % \
+                    summary += "Branch %s reset to %s\n" % \
                                (branch.name, branch.commit)
             else:
                 new_bname = self.branch_name_with_task()
@@ -700,7 +700,7 @@ class GitPhab:
                     if self.prompt("Rename current branch to '%s'?" %
                                    new_bname):
                         self.repo.head.reference.rename(new_bname)
-                        summary += "Branch renamed to %s" % new_bname
+                        summary += "Branch renamed to %s\n" % new_bname
                 else:
                     # Current branch is probably something like 'master' or
                     # 'gnome-3-18', better create a new branch than renaming.
@@ -708,7 +708,7 @@ class GitPhab:
                                    "'%s'?" % new_bname):
                         new_branch = self.repo.create_head(new_bname)
                         new_branch.checkout()
-                        summary += "Branch %s created and checked out" % \
+                        summary += "Branch %s created and checked out\n" % \
                                    new_bname
 
         print("\n\nSummary:")
