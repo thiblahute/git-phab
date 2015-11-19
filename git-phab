@@ -31,6 +31,7 @@ import re
 import sys
 import json
 from urllib.parse import urlsplit, urlunsplit
+from gi.repository import GLib
 
 
 class Colors(object):
@@ -290,6 +291,26 @@ class GitPhab:
         if self.phabricator_uri[-1] == '/':
             self.phabricator_uri = self.phabricator_uri[:-1]
 
+    def get_config_path(self):
+        return os.path.join(GLib.get_user_config_dir(), 'git', 'phab')
+
+    def read_config(self):
+        path = self.get_config_path()
+        try:
+            with open(path) as f:
+                self.config = json.load(f)
+        except FileNotFoundError as e:
+            self.config = {}
+
+        if 'emails' not in self.config:
+            self.config['emails'] = {}
+
+    def write_config(self):
+        path = self.get_config_path()
+        with open(path, 'w') as f:
+            json.dump(self.config, f, sort_keys=True, indent=4,
+                      separators=(',', ': '))
+
     def ensure_project_phids(self):
         reply = self.conduit("project.query", {"names": self.projects})
         self.project_phids = list(reply["response"]["data"].keys())
@@ -303,6 +324,7 @@ class GitPhab:
     def validate_args(self):
         self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
         self.read_arcconfig()
+        self.read_config()
 
         # Ensure user has setup git-phab before first usage
         try:
@@ -474,13 +496,22 @@ class GitPhab:
         return '\n\n'.join([subject, body, fields])
 
     def format_user(self, fullname):
+        # Check if the email is in our config
+        email = self.config['emails'].get(fullname)
+        if email:
+            return "%s <%s>" % (fullname, email)
+
+        # Check if the email is in git log
         output = self.repo.git.shortlog(summary=True, email=True, number=True)
         m = re.search(re.escape(fullname) + ' <.*>$', output, re.MULTILINE)
         if m:
             return m.group(0)
 
+        # Ask user for the email
         email = input("Please enter email address for %s: " % fullname).strip()
         if len(email) > 0:
+            self.config['emails'][fullname] = email
+            self.write_config()
             return "%s <%s>" % (fullname, email)
 
         return None
