@@ -102,7 +102,9 @@ removed.
 
 Same as `git push` but for each commit that would be pushed, query who approved
 its differential and add corresponding 'Reviewed-by:' line. Note that the email
-address is guessed by looking the reviewer's fullname into `git shortlog`.
+address is guessed by looking the reviewer's fullname into `git shortlog`. If
+the fullname cannot be found it will be asked then stored into
+~/.config/git/phab so it won't be prompted again.
 +
 For each related tasks, also prompt if it should be closed.
 
