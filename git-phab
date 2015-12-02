@@ -307,6 +307,11 @@ class GitPhab:
 
     def write_config(self):
         path = self.get_config_path()
+
+        dir = os.path.dirname(path)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+
         with open(path, 'w') as f:
             json.dump(self.config, f, sort_keys=True, indent=4,
                       separators=(',', ': '))
