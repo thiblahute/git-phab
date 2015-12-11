@@ -38,7 +38,7 @@ REQUIREMENTS
  - pip3 install GitPython
  - pip3 install appdirs
  - pip3 install argcomplete
- - arcanist
+ - pip3 install phabricator
 
 DESCRIPTION
 ===========
