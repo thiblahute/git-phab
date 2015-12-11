@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# PYTHON_ARGCOMPLETE_OK
 #
 # git-phab - git subcommand to integrate with phabricator
 #
@@ -32,9 +31,15 @@ import os
 import re
 import sys
 import json
+
 import appdirs
+import phabricator
 import shutil
+
 from urllib.parse import urlsplit, urlunsplit
+
+
+ON_WINDOWS = os.name == 'nt'
 
 
 class Colors(object):
@@ -47,6 +52,7 @@ class Colors(object):
 
 
 class GitPhab:
+
     def __init__(self):
         self.task = None
         self.remote = None
@@ -55,10 +61,69 @@ class GitPhab:
         self.cc = None
         self.projects = None
         self.output_directory = None
+        self.repo_phid = None
 
-    def check_conduit_reply(self, reply):
-        if reply['errorMessage'] is not None:
-            self.die(reply['errorMessage'])
+        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
+        self.read_arcconfig()
+        self.login()
+
+    def login(self):
+        needs_credential = False
+        try:
+            host = self.phabricator_uri + "/api/"
+            self.phabricator = phabricator.Phabricator(timeout=120, host=host)
+
+            if not self.phabricator.token and not self.phabricator.certificate:
+                needs_credential = True
+
+            # FIXME, workaround
+            # https://github.com/disqus/python-phabricator/issues/37
+            self.phabricator.differential.creatediff.api.interface[
+                "differential"]["creatediff"]["required"]["changes"] = [dict]
+        except phabricator.ConfigurationError:
+            needs_credential = True
+
+        if needs_credential:
+            if self.setup_login_certificate():
+                self.die("Try again now that the login certificate has been"
+                         " added")
+            else:
+                self.die("Please setup login certificate before trying again")
+
+        self.phab_user = self.phabricator.user.whoami()
+
+    def setup_login_certificate(self):
+        token = input("""LOGIN TO PHABRICATOR
+Open this page in your browser and login to Phabricator if necessary:
+
+%s/conduit/login/
+
+Then paste the API Token on that page below.
+
+Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
+        path = os.path.join(os.environ['AppData'] if ON_WINDOWS
+                            else os.path.expanduser('~'), '.arcrc')
+
+        host = self.phabricator_uri + "/api/"
+        host_token = {"token": token}
+        try:
+            with open(path) as f:
+                arcrc = json.load(f)
+
+                if arcrc.get("hosts"):
+                    arcrc["hosts"][host] = host_token
+                else:
+                    arcrc = {
+                        "hosts": {host: host_token}}
+
+        except (FileNotFoundError, json.decoder.JSONDecodeError):
+            arcrc = {"hosts": {host: host_token}}
+
+        with open(path, "w") as f:
+            print("Writing %s" % path)
+            json.dump(arcrc, f, indent=2)
+
+        return True
 
     # Copied from git-bz
     def die(self, message):
@@ -119,11 +184,9 @@ class GitPhab:
         if len(task_infos) > 1:
             description = '\n'.join(task_infos[1:])
 
-        reply = self.conduit("maniphest.createtask", {
-            "title": title,
-            "description": description,
-            "projectPHIDs": self.project_phids,
-        })
+        reply = self.phabricator.maniphest.createtask(
+            title=title, description=description,
+            projectPHIDs=self.project_phids)
 
         return reply
 
@@ -183,31 +246,17 @@ class GitPhab:
             if diffid:
                 statuses[int(diffid)] = "Unknown"
 
-        reply = self.conduit('differential.query', {
-            "ids": list(statuses.keys())
-        })
-
-        if reply["error"]:
+        reply = self.phabricator.differential.query(ids=list(statuses.keys()))
+        if reply.response is None:
             print("Could not get informations about differentials status")
         else:
-            for diff in reply["response"]:
+            for diff in reply:
                 statuses[int(diff["id"])] = diff["statusName"]
 
         for c in commits:
             diffid = self.get_differential_id(c)
             status = statuses.get(int(diffid)) if diffid else None
             print(self.format_commit(c, status))
-
-    def conduit(self, cmd, params):
-        data = bytes(json.dumps(params), 'utf-8')
-        arc_cmd = ['arc']
-        if self.arcrc:
-            arc_cmd += ['--arcrc-file', self.arcrc]
-
-        arc_cmd += ['call-conduit', cmd]
-        output = subprocess.check_output(arc_cmd,
-                                         input=data)
-        return json.loads(output.decode('utf-8'))
 
     def in_feature_branch(self):
         # If current branch is "master" it's obviously not a feature branch.
@@ -311,7 +360,7 @@ class GitPhab:
         try:
             with open(path) as f:
                 self.config = json.load(f)
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             self.config = {}
 
         if 'emails' not in self.config:
@@ -329,16 +378,16 @@ class GitPhab:
                       separators=(',', ': '))
 
     def ensure_project_phids(self):
-        by_names = self.conduit("project.query", {"names": self.projects})
-        by_slugs = self.conduit("project.query", {"slugs": self.projects})
+        by_names = self.phabricator.project.query(names=self.projects)
+        by_slugs = self.phabricator.project.query(slugs=self.projects)
 
         self.project_phids = []
         project_map = {}
 
         for reply in (by_names, by_slugs):
-            if not reply["response"]["data"]:
+            if not reply.data:
                 continue
-            for (phid, data) in reply["response"]["data"].items():
+            for (phid, data) in reply.data.items():
                 project_map[data["name"].lower()] = phid
                 for s in data["slugs"]:
                     project_map[s.lower()] = phid
@@ -404,7 +453,6 @@ class GitPhab:
                              .format(self.remote, fetchurl, pushurl))
 
     def validate_args(self):
-        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
         self.read_arcconfig()
         self.read_config()
 
@@ -461,6 +509,26 @@ class GitPhab:
             self.die("No project has been defined.\n"
                      "You can add 'projects': 'p1, p2' in your .arcconfig\n"
                      "Aborting.")
+
+        if "repository.callsign" in self.arcconfig:
+            reply = self.phabricator.repository.query(
+                callsigns=[self.arcconfig["repository.callsign"]])
+            assert(len(reply) == 1)
+            self.repo_phid = reply[0]["phid"]
+        else:
+
+            for phab_repo in self.phabricator.repository.query():
+                if self.repo_phid:
+                    break
+
+                for remote in self.repo.remotes:
+                    if phab_repo['remoteURI'] == remote.url:
+                        self.repo_phid = phab_repo["phid"]
+                        break
+
+        if not self.repo_phid:
+            self.die("Could not determine Phabricator repository\n"
+                     "You should set 'repository.callsign' in '.arcconfig'")
 
     def line_in_headers(self, line, headers):
         for header in headers:
@@ -544,11 +612,12 @@ class GitPhab:
             header_ = header[:-1] + '_:'
             s = re.sub(re.escape(header), header_, subject, flags=re.I)
             b = re.sub(re.escape(header), header_, body, flags=re.I)
-            if (s != subject or b != body) and (not ask or
-               self.prompt("Commit message contains '%s'.\n"
-                           "It could confuse phabricator's parser.\n"
-                           "Do you want to prefix is with an underscore?" %
-                           header)):
+            if (s != subject or b != body) and (
+                not ask or self.prompt(
+                    "Commit message contains '%s'.\n"
+                    "It could confuse phabricator's parser.\n"
+                    "Do you want to prefix is with an underscore?" %
+                    header)):
                 subject = s
                 body = b
 
@@ -585,10 +654,9 @@ class GitPhab:
 
         # This seems to be the only way to get the Maniphest and
         # reviewers of a differential.
-        reply = self.conduit('differential.getcommitmessage', {
-            'revision_id': diffid
-        })
-        msg = reply['response']
+        reply = self.phabricator.differential.getcommitmessage(
+            revision_id=diffid)
+        msg = reply.response
 
         # Get tasks bound to this differential
         m = re.search('^Maniphest Tasks: (.*)$', msg, re.MULTILINE)
@@ -598,10 +666,8 @@ class GitPhab:
         m = re.search('^Reviewed By: (.*)$', msg, re.MULTILINE)
         usernames = [r.strip() for r in m.group(1).split(',')] if m else []
         if usernames:
-            reply = self.conduit('user.query', {
-                'usernames': usernames
-            })
-            for user in reply['response']:
+            reply = self.phabricator.user.query(usernames=usernames)
+            for user in reply:
                 person = self.format_user(user['realName'])
                 if person:
                     reviewers.add(person)
@@ -611,11 +677,84 @@ class GitPhab:
     def remove_ourself_from_reviewers(self):
         if self.reviewers is None:
             return
-        reply = self.conduit("user.whoami", {})
-        username = reply['response']['userName']
+        reply = self.phabricator.user.whoami()
+        username = reply['userName']
         reviewers = [r.strip() for r in self.reviewers.split(',')]
         reviewers = list(filter(lambda r: r != username, reviewers))
         self.reviewers = ','.join(reviewers)
+
+    def attach_commit(self, commit):
+        phab = self.phabricator
+
+        print("attach " + commit.hexsha)
+        subject, body, fields, updates = self.parse_commit_msg(commit.message)
+        last_revision_id = self.get_differential_id(
+            self.repo.head.commit.parents[0])
+
+        if last_revision_id:
+            body.append("Depends on D%s" % last_revision_id)
+
+        fields.append("Projects: %s" % ','.join(self.project_phids))
+        diff = phab.differential.createrawdiff(
+            diff=self.repo.git.show("HEAD", "--unified=999999999"),
+            repositoryPHID=self.repo_phid)
+
+        revision_id = self.get_differential_id(self.repo.head.commit)
+        if revision_id:
+            arc_message = phab.differential.getcommitmessage(
+                revision_id=revision_id, edit="update",
+                fields=fields).response
+        else:
+            arc_message = phab.differential.getcommitmessage(
+                edit="create", fields=fields).response
+
+            arc_message = arc_message.replace(
+                "<<Replace this line with your Revision Title>>",
+                subject)
+            if body:
+                arc_message = arc_message.replace(
+                    "Summary: ",
+                    "Summary:\n" + '\n'.join(body))
+
+            if self.reviewers:
+                arc_message = arc_message.replace(
+                    "Reviewers: ", "Reviewers: " + self.reviewers)
+
+            if self.cc:
+                arc_message = arc_message.replace(
+                    "Subscribers: ", "Subscribers: " + self.cc)
+
+        arc_message = '\n'.join([
+            l for l in arc_message.split("\n")
+            if not l.startswith("#")])
+
+        if self.task:
+            arc_message += "\n\nManiphest Tasks: %s" % (
+                self.task)
+
+        parsed_message = phab.differential.parsecommitmessage(
+            corpus=arc_message)
+
+        fields = parsed_message["fields"]
+        if not revision_id:
+            return True, phab.differential.createrevision(fields=fields,
+                                                          diffid=diff.id)
+        else:
+            message = None
+            if updates:
+                message = "\n".join([u for u in updates if u])
+            if not message:
+                message = self.message
+
+            if not message:
+                message = self.edit_template(
+                    "\n# Explain the changes you made since last "
+                    " commit proposal\n")
+                message = "\n".join(message)
+
+            return False, phab.differential.updaterevision(
+                id=revision_id, fields=fields,
+                diffid=diff.id, message=message)
 
     def do_attach(self):
         if self.repo.is_dirty():
@@ -678,7 +817,7 @@ class GitPhab:
 
         if self.task == "T":
             try:
-                self.task = self.create_task()["response"]["objectName"]
+                self.task = self.create_task()["objectName"]
                 summary += "New: task %s\n" % self.task
             except KeyError:
                 self.die("Could not create task.")
@@ -686,21 +825,7 @@ class GitPhab:
         orig_commit = self.repo.head.commit
         orig_branch = self.repo.head.reference
 
-        arc_cmd = ['arc']
-        if self.arcrc:
-            arc_cmd += ['--arcrc-file', self.arcrc]
-
-        arc_cmd += ['diff',
-                    '--allow-untracked',
-                    '--config', 'history.immutable=false',
-                    '--verbatim']
-        if self.reviewers:
-            arc_cmd.append('--reviewers=' + self.reviewers)
-        if self.cc:
-            arc_cmd.append('--cc=' + self.cc)
-        arc_cmd.append('HEAD~1')
-
-        arc_failed = False
+        patch_attachement_failure = False
         try:
             # Detach HEAD from the branch; this gives a cleaner reflog for the
             # branch
@@ -711,68 +836,28 @@ class GitPhab:
             for commit in reversed(all_commits):
                 self.repo.git.cherry_pick(commit.hexsha)
 
-                if not arc_failed and commit in commits:
-                    # Add extra info in the commit msg. It is important that
-                    # phabricator fields are last, after all common git fields
-                    # like 'Reviewed-by:', etc. Note that "Depends on" is not a
-                    # field and is parsed from the body part.
-                    subject, body, fields, updates = self.parse_commit_msg(
-                        commit.message)
-
-                    local_arc_cmd = arc_cmd[:]
-
-                    if updates:
-                        # insert just before "HEAD~", which is the last
-                        # argument
-                        local_arc_cmd[-1:0] = ['--message', '\n'.join(updates)]
-                    elif self.message:
-                        local_arc_cmd[-1:0] = ['--message', self.message]
-
-                    last_revision_id = self.get_differential_id(
-                        self.repo.head.commit.parents[0])
-                    if last_revision_id:
-                        body.append("Depends on D%s" % last_revision_id)
-                    if self.task:
-                        fields.append("Maniphest Tasks: %s" % self.task)
-                    fields.append("Projects: %s" %
-                                  ','.join(self.project_phids))
-                    msg = self.format_commit_msg(subject, body, fields)
-
-                    cur_orig_commit = self.repo.head.commit
-                    self.repo.git.commit(amend=True, message=msg)
-
-                    print("attach " + commit.hexsha)
+                if not patch_attachement_failure and commit in commits:
                     try:
-                        subprocess.check_call(local_arc_cmd)
-                    except:
-                        print("Command '%s' failed. Finish rebuilding branch "
-                              "without proposing further patches" %
-                              local_arc_cmd)
-                        arc_failed = True
-                        self.repo.head.commit = cur_orig_commit
+                        new, revision = self.attach_commit(commit)
+                    except Exception as e:
+                        print("Failed proposing patch. "
+                              "Finnish rebuilding branch "
+                              "without proposing further patches: %s" % e)
+                        patch_attachement_failure = True
                         summary += "Failed proposing: %s -- " \
                             "NO MORE PATCH PROPOSED\n" % self.format_commit(
                                 self.repo.head.commit)
                         continue
 
-                    # arc diff modified our commit message. Re-commit it with
-                    # the original message, adding only the
-                    # "Differential Revision:" line, and removing the
-                    # list of updates after "---" if any (now that they
-                    # have been described in Phabricator, they should not
-                    # be mentioned again).
                     msg = self.strip_updates(commit.message)
 
-                    orig_link = self.get_differential_link(commit)
-                    new_link = self.get_differential_link(
-                        self.repo.head.commit)
-                    if orig_link is None and new_link is not None:
-                        msg = msg + '\nDifferential Revision: ' + new_link
+                    # Add the "Differential Revision:" line.
+                    if new:
+                        msg = msg + '\nDifferential Revision: ' + revision.uri
                         summary += "New: "
                     else:
-                        summary += "Updated: "
+                        summary += "Updated: " + revision.uri
 
-                    self.repo.head.commit = cur_orig_commit
                     self.repo.git.commit(amend=True, message=msg)
 
                     summary += self.format_commit(self.repo.head.commit) + "\n"
@@ -790,7 +875,7 @@ class GitPhab:
             self.repo.head.reset(index=True, working_tree=True)
             raise
 
-        if self.remote and self.task and not arc_failed:
+        if self.remote and self.task and not patch_attachement_failure:
             try:
                 branch = self.get_wip_branch()
                 remote = self.repo.remote(self.remote)
@@ -806,12 +891,9 @@ class GitPhab:
 
                 uri = "%s#%s" % (self.remote_url, branch)
                 try:
-                    self.conduit('maniphest.update', {
-                        "id": int(self.task[1:]),
-                        "auxiliary": {
-                            "std:maniphest:git:uri-branch": uri
-                        }
-                    })
+                    self.phabricator.maniphest.update(
+                        id=int(self.task[1:]),
+                        auxiliary={"std:maniphest:git:uri-branch": uri})
                 except:
                     print("Failed to set std:maniphest:git:uri-branch to %s"
                           % uri)
@@ -880,39 +962,32 @@ class GitPhab:
 
     def get_diff_phid(self, phid):
         # Convert diff phid to a name
-        reply = self.conduit("phid.query", {"phids": [phid]})
+        reply = self.phabricator.phid.query(phids=[phid])
 
-        self.check_conduit_reply(reply)
-        assert(len(reply['response']) == 1)
+        assert(len(reply) == 1)
 
         # Convert name to a diff json object
-        response = reply['response'][phid]
+        response = reply[phid]
         assert(response['type'] == "DIFF")
 
         d = response['name'].strip("Diff ")
-        reply = self.conduit("differential.querydiffs", {
-            "ids": [d]
-        })
-        self.check_conduit_reply(reply)
-        assert(len(reply['response']) == 1)
+        reply = self.phabricator.differential.querydiffs(ids=[d])
+        assert(len(reply) == 1)
 
-        response = reply['response'][d]
+        response = reply[d]
         assert(response['sourceControlSystem'] == "git")
 
         return response
 
     def get_revision_and_diff(self, diff=None, phid=None):
         if diff is not None:
-            query = {"ids": [diff]}
+            reply = self.phabricator.differential.query(ids=[diff])
         else:
-            query = {"phids": [phid]}
+            reply = self.phabricator.differential.query(phid=[phid])
 
-        reply = self.conduit("differential.query",  query)
-        self.check_conduit_reply(reply)
-        assert(len(reply['response']) == 1)
+        assert(len(reply) == 1)
 
-        revision = reply['response'][0]
-
+        revision = reply[0]
         diff = self.get_diff_phid(revision['activeDiffPHID'])
 
         return revision, diff
@@ -930,7 +1005,8 @@ class GitPhab:
             keys = []
 
         for key in keys:
-            commit_hash = diff["properties"]["local:commits"][key].get("commit")
+            commit_hash = diff["properties"]["local:commits"][key].get(
+                "commit")
             if commit_hash:
                 f.write("From: %s Mon Sep 17 00:00:00 2001\n" % commit_hash)
                 break
@@ -948,14 +1024,11 @@ class GitPhab:
         f.write("Differential Revision: {}/D{}\n\n".format(
             self.phabricator_uri, revision['id']))
 
-        arc_cmd = ['arc']
-        if self.arcrc:
-            arc_cmd += ['--arcrc-file', self.arcrc]
-        arc_cmd += ["export", "--git", "--revision", revision['id']]
+        diffid = self.get_diff_phid(revision['activeDiffPHID'])["id"]
+        output = self.phabricator.differential.getrawdiff(diffID=diffid)
 
-        output = subprocess.check_output(arc_cmd, universal_newlines=True)
+        f.write(output.response)
 
-        f.write(output)
         f.close()
 
         return filename
@@ -978,9 +1051,10 @@ class GitPhab:
         try:
             self.repo.head.reference = self.repo.commit(base_commit)
         except gitdb.exc.BadObject:
-            self.die("%sCould not apply patch %s from %s (even on base commit %s), aborting%s"
-                   % (Colors.FAIL, filename, self.differential, base_commit,
-                      Colors.ENDC))
+            self.die("%sCould not apply patch %s from %s (even on base commit"
+                     " %s), aborting%s" % (
+                         Colors.FAIL, filename, self.differential, base_commit,
+                         Colors.ENDC))
         self.repo.head.reset(index=True, working_tree=True)
 
         # Apply the patch on it
@@ -1057,10 +1131,10 @@ class GitPhab:
         self.print_commits(commits)
 
     def fetch(self):
-        reply = self.conduit('maniphest.query', {
-            "ids": [int(self.task[1:])]
-        })
-        props = list(reply['response'].values())[0]
+
+        reply = self.phabricator.maniphest.query(ids=[int(self.task[1:])])
+
+        props = list(reply.values())[0]
         uri = props['auxiliary']['std:maniphest:git:uri-branch']
         remote, branch = uri.split('#')
 
@@ -1146,9 +1220,9 @@ class GitPhab:
                 branch_task.append((r, task))
 
         task_ids = [t[1:] for b, t in branch_task]
-        reply = self.conduit('maniphest.query', {"ids": task_ids})
+        reply = self.phabricator.maniphest.query(ids=task_ids)
 
-        for tphid, task in reply["response"].items():
+        for tphid, task in reply.items():
             if not task["isClosed"]:
                 continue
 
@@ -1251,10 +1325,8 @@ class GitPhab:
         # Propose to close tasks
         for task in set(all_tasks):
             if self.prompt("Do you want to close '%s'?" % task):
-                self.conduit("maniphest.update", {
-                    'id': int(task[1:]),
-                    'status': 'resolved'
-                })
+                self.phabricator.maniphest.update(id=int(task[1:]),
+                                                  status='resolved')
 
     def run(self):
         self.validate_args()
