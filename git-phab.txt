@@ -135,4 +135,3 @@ Push current branch to origin/wip/phab/T123
 Fetch a branch associated with the task T123
 [verse]
   $ git phab fetch T123
-
