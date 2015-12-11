@@ -30,8 +30,8 @@ import os
 import re
 import sys
 import json
+import appdirs
 from urllib.parse import urlsplit, urlunsplit
-from gi.repository import GLib
 
 
 class Colors(object):
@@ -292,7 +292,7 @@ class GitPhab:
             self.phabricator_uri = self.phabricator_uri[:-1]
 
     def get_config_path(self):
-        return os.path.join(GLib.get_user_config_dir(), 'git', 'phab')
+        return os.path.join(appdirs.user_config_dir('git'), 'phab')
 
     def read_config(self):
         path = self.get_config_path()
