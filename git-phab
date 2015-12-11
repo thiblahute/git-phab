@@ -680,7 +680,8 @@ class GitPhab:
                     new_link = self.get_differential_link(
                         self.repo.head.commit)
                     if orig_link is None and new_link is not None:
-                        msg = msg + '\nDifferential Revision: ' + new_link
+                        msg = msg + '\nDifferential Revision: ' + new_link + \
+                                "\n"
                         summary += "New: "
                     else:
                         summary += "Updated: "
