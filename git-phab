@@ -709,8 +709,14 @@ class GitPhab:
                 branch = self.get_wip_branch()
                 remote = self.repo.remote(self.remote)
                 if self.prompt('Push HEAD to %s/%s?' % (remote, branch)):
-                    remote.push('HEAD:refs/heads/' + branch, force=True)
-                    summary += "Branch pushed to %s/%s\n" % (remote, branch)
+                    info = remote.push('HEAD:refs/heads/' + branch,
+                                       force=True)[0]
+                    if not info.flags & info.ERROR:
+                        summary += "Branch pushed to %s/%s\n" % (remote,
+                                                                 branch)
+                    else:
+                        print("Could not push branch %s/%s: %s" % (
+                            remote, branch, info.summary))
 
                 uri = "%s#%s" % (self.remote_url, branch)
                 try:
