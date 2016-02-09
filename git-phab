@@ -1028,6 +1028,15 @@ class GitPhab:
         if self.repo.is_dirty():
             self.die("Repository is dirty. Aborting.")
 
+        if self.task:
+            commit, remote_branch_name = self.fetch()
+            branch = self.repo.active_branch
+            if not self.prompt("Do you want to reset branch %s to %s?" %
+                               (branch.name, commit.hexsha)):
+                self.die("Aborting")
+
+            branch.commit = commit
+
         # Collect commits that will be pushed
         output = self.repo.git.push(dry_run=True, porcelain=True)
         m = re.search('[0-9a-z]+\.\.[0-9a-z]+', output)
@@ -1214,6 +1223,10 @@ if __name__ == '__main__':
     land_parser.add_argument(
         '--no-push', action="store_true",
         help="Only rewrite commit messages but do not push.") \
+        .completer = DisabledCompleter
+    land_parser.add_argument(
+        'task', metavar='<T123>', nargs='?',
+        help="The task to land") \
         .completer = DisabledCompleter
 
     argcomplete.autocomplete(parser)
