@@ -197,9 +197,13 @@ class GitPhab:
 
     def conduit(self, cmd, params):
         data = bytes(json.dumps(params), 'utf-8')
-        output = subprocess.check_output('arc call-conduit ' + cmd,
-                                         input=data,
-                                         shell=True)
+        arc_cmd = ['arc']
+        if self.arcrc:
+            arc_cmd += ['--arcrc-file', self.arcrc]
+
+        arc_cmd += ['call-conduit', cmd]
+        output = subprocess.check_output(arc_cmd,
+                                         input=data)
         return json.loads(output.decode('utf-8'))
 
     def in_feature_branch(self):
@@ -628,11 +632,14 @@ class GitPhab:
         orig_commit = self.repo.head.commit
         orig_branch = self.repo.head.reference
 
-        arc_cmd = ['arc',
-                   'diff',
-                   '--allow-untracked',
-                   '--config', 'history.immutable=false',
-                   '--verbatim']
+        arc_cmd = ['arc']
+        if self.arcrc:
+            arc_cmd += ['--arcrc-file', self.arcrc]
+
+        arc_cmd += ['diff',
+                    '--allow-untracked',
+                    '--config', 'history.immutable=false',
+                    '--verbatim']
         if self.reviewers:
             arc_cmd.append('--reviewers=' + self.reviewers)
         if self.cc:
@@ -852,7 +859,10 @@ class GitPhab:
         f.write("Differential Revision: {}/D{}\n".format(
             self.phabricator_uri, revision['id']))
 
-        arc_cmd = ["arc", "export", "--git", "--revision", revision['id']]
+        arc_cmd = ['arc']
+        if self.arcrc:
+            arc_cmd += ['--arcrc-file', self.arcrc]
+        arc_cmd += ["export", "--git", "--revision", revision['id']]
 
         output = subprocess.check_output(arc_cmd, universal_newlines=True)
 
@@ -1131,6 +1141,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Phabricator integration.')
     subparsers = parser.add_subparsers(dest='subparser_name')
     subparsers.required = True
+
+    parser.add_argument('--arcrc', help="arc configuration file")
 
     attach_parser = subparsers.add_parser(
         'attach', help="Generate a Differential for each commit")
