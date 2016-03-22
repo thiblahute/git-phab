@@ -241,7 +241,7 @@ class GitPhab:
         return "wip/phab/" + self.branch_name_with_task()
 
     def filter_already_proposed_commits(self, commits, all_commits):
-        if not self.task:
+        if not self.task or not self.remote:
             return
 
         remote_commit = None
@@ -331,24 +331,8 @@ class GitPhab:
                 self.die("%sProject `%s` doesn't seem to exist%s" %
                          (Colors.FAIL, p, Colors.ENDC))
 
-    def validate_args(self):
-        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
-        self.read_arcconfig()
-        self.read_config()
-
-        # Ensure user has setup git-phab before first usage
-        try:
-            config_remote = self.repo.config_reader().get_value(
-                'phab', 'remote')
-        except:
-            self.die("** Please configure git-phab before first usage.\n\n"
-                     " - Set the remote to be used to push your branches for "
-                     "review (e.g. 'origin').\n"
-                     "       git config phab.remote <remote>\n")
-
-        if not self.remote:
-            self.remote = config_remote
-
+    def validate_remote(self):
+        # If a remote is setup ensure that it's valid
         # Validate that self.remote exists
         try:
             self.repo.remote(self.remote)
@@ -395,6 +379,20 @@ class GitPhab:
                              "could define url.*.pushInsteadOf as well."
                              .format(self.remote, fetchurl, pushurl))
 
+    def validate_args(self):
+        self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
+        self.read_arcconfig()
+        self.read_config()
+
+        if not self.remote:
+            try:
+                self.remote = self.repo.config_reader().get_value(
+                    'phab', 'remote')
+            except:
+                pass
+
+        if self.remote:
+            self.validate_remote()
         # Try to guess the task from branch name
         if self.repo.head.is_detached:
             self.die("HEAD is currently detached. Aborting.")
@@ -718,7 +716,7 @@ class GitPhab:
             self.repo.head.reset(index=True, working_tree=True)
             raise
 
-        if self.task and not arc_failed:
+        if self.remote and self.task and not arc_failed:
             try:
                 branch = self.get_wip_branch()
                 remote = self.repo.remote(self.remote)
