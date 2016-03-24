@@ -903,12 +903,6 @@ class GitPhab:
             if len(c.parents) > 1:
                 self.die("'%s' is a merge commit. Aborting." % c.hexsha)
 
-        # Ask confirmation
-        self.print_commits(commits)
-        if not self.prompt("Do you want to push above commits?"):
-            print("Aborting")
-            exit(0)
-
         orig_commit = self.repo.head.commit
         orig_branch = self.repo.head.reference
         all_tasks = []
@@ -948,8 +942,14 @@ class GitPhab:
             self.repo.head.reset(index=True, working_tree=True)
             raise
 
+        self.print_commits(commits)
         if self.no_push:
             return
+
+        # Ask confirmation
+        if not self.prompt("Do you want to push above commits?"):
+            print("Aborting")
+            exit(0)
 
         # Do the real push
         self.repo.git.push()
