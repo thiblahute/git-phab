@@ -25,6 +25,7 @@ import tempfile
 import subprocess
 import argparse
 import argcomplete
+from datetime import datetime
 import git
 import os
 import re
@@ -51,6 +52,10 @@ class GitPhab:
         self.reviewers = None
         self.cc = None
         self.projects = None
+
+    def check_conduit_reply(self, reply):
+        if reply['errorMessage'] is not None:
+            self.die(reply['errorMessage'])
 
     # Copied from git-bz
     def die(self, message):
@@ -772,6 +777,140 @@ class GitPhab:
         print("\n\nSummary:")
         print(summary)
 
+    def has_been_applied(self, revision):
+        did = int(revision['id'])
+
+        for c in self.repo.iter_commits():
+            i = self.get_differential_id(c)
+            if i == did:
+                return True
+        return False
+
+    def get_diff_phid(self, phid):
+        # Convert diff phid to a name
+        reply = self.conduit("phid.query", {"phids": [phid]})
+
+        self.check_conduit_reply(reply)
+        assert(len(reply['response']) == 1)
+
+        # Convert name to a diff json object
+        response = reply['response'][phid]
+        assert(response['type'] == "DIFF")
+
+        d = response['name'].strip("Diff ")
+        reply = self.conduit("differential.querydiffs", {
+            "ids": [d]
+        })
+        self.check_conduit_reply(reply)
+        assert(len(reply['response']) == 1)
+
+        response = reply['response'][d]
+        assert(response['sourceControlSystem'] == "git")
+
+        return response
+
+    def get_revision_and_diff(self, diff=None, phid=None):
+        if diff is not None:
+            query = {"ids": [diff]}
+        else:
+            query = {"phids": [phid]}
+
+        reply = self.conduit("differential.query",  query)
+        self.check_conduit_reply(reply)
+        assert(len(reply['response']) == 1)
+
+        revision = reply['response'][0]
+
+        diff = self.get_diff_phid(revision['activeDiffPHID'])
+
+        return revision, diff
+
+    def write_patch_file(self, revision, diff):
+        date = datetime.utcfromtimestamp(int(diff['dateModified']))
+
+        handle, filename = tempfile.mkstemp(".patch", "git-phab-")
+        f = os.fdopen(handle, "w")
+
+        f.write("Date: {} +0000\n".format(date))
+        f.write("From: {} <{}>\n".format(
+            diff['authorName'],
+            diff['authorEmail']))
+        f.write("Subject: {}\n\n".format(revision['title']))
+
+        # Drop the arc insert Depends on Dxxxx line if needed
+        summary = re.sub(re.compile("^\s*Depends on D\d+\n?", re.M), "",
+                         revision['summary'])
+        f.write("{}\n".format(summary))
+        f.write("Differential Revision: {}/D{}\n".format(
+            self.phabricator_uri, revision['id']))
+
+        arc_cmd = ["arc", "export", "--git", "--revision", revision['id']]
+
+        output = subprocess.check_output(arc_cmd, universal_newlines=True)
+
+        f.write(output)
+        f.close()
+
+        return filename
+
+    def am_patch(self, filename):
+        try:
+            self.repo.git.am(filename)
+        except git.exc.GitCommandError as e:
+            print(e)
+            self.repo.git.am("--abort")
+            self.die("{}git am failed, aborting{}".format(
+                Colors.FAIL, Colors.ENDC))
+
+    def do_cherry_pick(self):
+        if self.repo.is_dirty():
+            self.die("Repository is dirty. Aborting.")
+
+        print("Checking revision: ", self.differential)
+        did = self.differential.strip("D")
+
+        revision, diff = self.get_revision_and_diff(diff=did)
+
+        if self.has_been_applied(revision):
+            self.die("{} was already applied\n".format(self.differential))
+
+        filename = self.write_patch_file(revision, diff)
+        self.am_patch(filename)
+        os.unlink(filename)
+
+    def do_merge(self):
+        if self.repo.is_dirty():
+            self.die("Repository is dirty. Aborting.")
+
+        print("Checking revision: ", self.differential)
+        did = self.differential.strip("D")
+
+        revision, diff = self.get_revision_and_diff(diff=did)
+        dq = [(revision, diff)]
+        pq = []
+
+        while dq != []:
+            top = dq.pop()
+            pq.append(top)
+            depends = top[0]['auxiliary']['phabricator:depends-on']
+            for p in depends:
+                revision, diff = self.get_revision_and_diff(phid=p)
+
+                if self.has_been_applied(revision):
+                    print("Already applied revision: ", revision['id'])
+                    continue
+
+                print("Getting Depend: D{}".format(revision['id']))
+                dq.append((revision, diff))
+
+        while pq != []:
+            (r, d) = pq.pop()
+
+            print("Applying D{}".format(r['id']))
+            filename = self.write_patch_file(r, d)
+            self.am_patch(filename)
+            os.unlink(filename)
+
     def do_log(self):
         commits = self.get_commits(self.revision_range)
         self.print_commits(commits)
@@ -964,7 +1103,7 @@ class GitPhab:
 
     def run(self):
         self.validate_args()
-        method = 'do_' + self.subparser_name
+        method = 'do_' + self.subparser_name.replace('-', '_')
         getattr(self, method)()
 
 
@@ -1015,6 +1154,22 @@ if __name__ == '__main__':
         nargs='?', default=None,
         help="commit or revision range to attach. When not specified, "
              "the tracking branch is used") \
+        .completer = DisabledCompleter
+
+    cherrypick_parser = subparsers.add_parser(
+        'cherry-pick', help="Cherrypick a patch from differential")
+    cherrypick_parser.add_argument(
+        'differential', metavar='Differential ID',
+        default=None,
+        help="help Differential ID to cherrypick") \
+        .completer = DisabledCompleter
+
+    merge_parser = subparsers.add_parser(
+        'merge', help="Merge a revision and its dependencies")
+    merge_parser.add_argument(
+        'differential', metavar='Differential ID',
+        default=None,
+        help="help Differential ID to merge") \
         .completer = DisabledCompleter
 
     log_parser = subparsers.add_parser(
