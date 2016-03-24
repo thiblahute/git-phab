@@ -401,11 +401,11 @@ class GitPhab:
         self.branch_name = self.repo.head.reference.name
         self.branch_task = self.task_from_branchname(self.branch_name)
 
-        if not self.task:
+        if not self.task and self.task != "T":
             self.task = self.branch_task
 
         # Validate the self.task is in the right format
-        if self.task and not re.fullmatch('T[0-9]+', self.task):
+        if self.task and not re.fullmatch('T[0-9]*', self.task):
             self.die("Task '%s' is not in the correct format. "
                      "Expecting 'T123'." % self.task)
 
@@ -604,18 +604,28 @@ class GitPhab:
         # Ask confirmation before doing any harm
         self.print_commits(commits)
 
-        if not self.task:
-            if self.prompt("Create a task for above commits?"):
-                try:
-                    self.task = self.create_task()["response"]["objectName"]
-                    summary += "New: task %s\n" % self.task
-                except KeyError:
-                    self.die("Could not create task.")
+        if self.arcconfig.get('git-phab.force-tasks') and not self.task:
+            self.task = "T"
 
-        if not self.prompt("Attach above commits?" if not self.task else
-                           "Attach above commits to task %s?" % self.task):
+        if self.task == "T":
+            agreed = self.prompt("Attach above commits "
+                                 "and create a new task ?")
+        elif self.task:
+            agreed = self.prompt("Attach above commits to task %s?" %
+                                 self.task)
+        else:
+            agreed = self.prompt("Attach above commits?")
+
+        if not agreed:
             print("Aborting")
             sys.exit(0)
+
+        if self.task == "T":
+            try:
+                self.task = self.create_task()["response"]["objectName"]
+                summary += "New: task %s\n" % self.task
+            except KeyError:
+                self.die("Could not create task.")
 
         orig_commit = self.repo.head.commit
         orig_branch = self.repo.head.reference
@@ -1141,6 +1151,7 @@ if __name__ == '__main__':
         .completer = DisabledCompleter
     attach_parser.add_argument(
         '--task', '-t', metavar='<T123>',
+        nargs="?", const="T",
         help=("Set the task this Differential refers to")) \
         .completer = DisabledCompleter
     attach_parser.add_argument(

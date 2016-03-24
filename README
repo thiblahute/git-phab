@@ -47,12 +47,12 @@ it to set the default commit range to attach.
 
 Now fix your bugs...
 
-When the branch is ready for review, attach it:
-  $ git phab attach
+When the branch is ready for review, attach it (requesting the creation of a
+new task):
+  $ git phab attach --task
   Using revision range 'origin/master..'
   a3beba9 — Not attached — Truncate all_commits when filtering already proposed commits
-  Create a task for above commits? [yn] y
-  Attach above commits to task T3436? [yn] y
+  Attach above commits and create a new task? [yn] y
   (...)
   Push HEAD to xclaesse/wip/phab/T3436-fix-bugs? [yn] y
   Create and checkout a new branch called: T3436-fix-bugs? [yn] y
