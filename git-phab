@@ -32,6 +32,7 @@ import re
 import sys
 import json
 import appdirs
+import shutil
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -52,6 +53,7 @@ class GitPhab:
         self.reviewers = None
         self.cc = None
         self.projects = None
+        self.output_directory = None
 
     def check_conduit_reply(self, reply):
         if reply['errorMessage'] is not None:
@@ -801,6 +803,16 @@ class GitPhab:
                 return True
         return False
 
+    def move_to_output_directory(self, revision, diff, filename, n=0):
+        assert self.output_directory
+        os.makedirs(self.output_directory, exist_ok=True)
+
+        name = "{:04d}-{}.patch".format(
+            n, revision['title'].replace(" ", "_").replace("/", "_"))
+        target = os.path.join(self.output_directory, name)
+        shutil.copy(filename, target)
+        print(target)
+
     def get_diff_phid(self, phid):
         # Convert diff phid to a name
         reply = self.conduit("phid.query", {"phids": [phid]})
@@ -893,7 +905,10 @@ class GitPhab:
             self.die("{} was already applied\n".format(self.differential))
 
         filename = self.write_patch_file(revision, diff)
-        self.am_patch(filename)
+        if self.output_directory:
+            self.move_to_output_directory(revision, diff, filename)
+        else:
+            self.am_patch(filename)
         os.unlink(filename)
 
     def do_merge(self):
@@ -921,13 +936,18 @@ class GitPhab:
                 print("Getting Depend: D{}".format(revision['id']))
                 dq.append((revision, diff))
 
+        n = 0
         while pq != []:
             (r, d) = pq.pop()
 
-            print("Applying D{}".format(r['id']))
             filename = self.write_patch_file(r, d)
-            self.am_patch(filename)
+            if self.output_directory:
+                self.move_to_output_directory(r, d, filename, n)
+            else:
+                print("Applying D{}".format(r['id']))
+                self.am_patch(filename)
             os.unlink(filename)
+            n += 1
 
     def do_log(self):
         commits = self.get_commits(self.revision_range)
@@ -1189,6 +1209,10 @@ if __name__ == '__main__':
     cherrypick_parser = subparsers.add_parser(
         'cherry-pick', help="Cherrypick a patch from differential")
     cherrypick_parser.add_argument(
+        '--output-directory', '-o',
+        metavar='<directory>',
+        help="Directory to put patches in")
+    cherrypick_parser.add_argument(
         'differential', metavar='Differential ID',
         default=None,
         help="help Differential ID to cherrypick") \
@@ -1196,6 +1220,10 @@ if __name__ == '__main__':
 
     merge_parser = subparsers.add_parser(
         'merge', help="Merge a revision and its dependencies")
+    merge_parser.add_argument(
+        '--output-directory', '-o',
+        metavar='<directory>',
+        help="Directory to put patches in")
     merge_parser.add_argument(
         'differential', metavar='Differential ID',
         default=None,
