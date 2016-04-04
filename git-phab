@@ -1013,6 +1013,7 @@ class GitPhab:
 
     def do_clean(self):
         branch_task = []
+        self.repo.git.prune()
         for r in self.repo.references:
             if r.is_remote() and r.remote_name != self.remote:
                 continue
@@ -1035,8 +1036,11 @@ class GitPhab:
                 if self.prompt("Task '%s' has been closed, do you want to "
                                "delete branch '%s'?" % (task_name, branch)):
                     if branch.is_remote():
-                        self.repo.git.push(self.remote,
-                                           ":" + branch.remote_head)
+                        try:
+                            self.repo.git.push(self.remote,
+                                               ":" + branch.remote_head)
+                        except git.exc.GitCommandError:
+                            pass
                     else:
                         self.repo.delete_head(branch, force=True)
 
