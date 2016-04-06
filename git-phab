@@ -683,9 +683,46 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         reviewers = list(filter(lambda r: r != username, reviewers))
         self.reviewers = ','.join(reviewers)
 
-    def attach_commit(self, commit):
-        phab = self.phabricator
+    def run_linter(self):
+        if not os.path.exists(".pre-commit-config.yaml"):
+            if os.path.exists(".arclint"):
+                return subprocess.check_output("arc lint",
+                                               shell=True).decode("utf-8")
+            else:
+                return None
+        command = ["pre-commit", "run", "--files"]
 
+        for f in reversed(self.repo.git.show(
+                "--name-only", "--diff-filter=ACMR", "HEAD").split("\n")):
+            if not f:
+                break
+            command.append(f)
+
+        return subprocess.check_output(command).decode("utf-8")
+
+    def attach_commit(self, commit):
+        linter_message = None
+        print("Running linters...", end="")
+        try:
+            linter_result = self.run_linter()
+            print("%s OK%s" % (Colors.OKGREEN, Colors.ENDC))
+            if linter_result:
+                linter_message = "Linter results:\n\n```\n%s\n```" % (
+                    linter_result)
+        except BaseException as e:
+            if isinstance(e, subprocess.CalledProcessError):
+                linter_result = e.stdout.decode("utf-8")
+            else:
+                linter_result = str(e)
+
+            if not self.prompt("%s FAILED:\n\n%s\n\n%sAttach anyway?"
+                               % (Colors.FAIL, linter_result, Colors.ENDC)):
+                raise e
+
+            linter_message = "**LINTER FAILURE:**\n\n```\n%s\n```" % (
+                linter_result)
+
+        phab = self.phabricator
         print("attach " + commit.hexsha)
         subject, body, fields, updates = self.parse_commit_msg(commit.message)
         last_revision_id = self.get_differential_id(
@@ -737,8 +774,15 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         fields = parsed_message["fields"]
         if not revision_id:
-            return True, phab.differential.createrevision(fields=fields,
-                                                          diffid=diff.id)
+            revision = phab.differential.createrevision(fields=fields,
+                                                        diffid=diff.id)
+
+            if linter_message:
+                self.phabricator.differential.createcomment(
+                    revision_id=int(revision.revisionid),
+                    message=linter_message, action="none")
+
+            return True, revision
         else:
             message = None
             if updates:
@@ -751,6 +795,9 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     "\n# Explain the changes you made since last "
                     " commit proposal\n")
                 message = "\n".join(message)
+
+            if linter_message:
+                message += "\n\n%s" % linter_message
 
             return False, phab.differential.updaterevision(
                 id=revision_id, fields=fields,
@@ -843,6 +890,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                         print("Failed proposing patch. "
                               "Finnish rebuilding branch "
                               "without proposing further patches: %s" % e)
+                        sys.stdout.flush()
                         patch_attachement_failure = True
                         summary += "Failed proposing: %s -- " \
                             "NO MORE PATCH PROPOSED\n" % self.format_commit(
@@ -858,7 +906,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     else:
                         summary += "Updated: " + revision.uri
 
-                    self.repo.git.commit(amend=True, message=msg)
+                    self.repo.git.commit("-n", amend=True, message=msg)
 
                     summary += self.format_commit(self.repo.head.commit) + "\n"
                 else:
@@ -1044,7 +1092,6 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 self.die("{}git am failed, aborting{}".format(
                     Colors.FAIL, Colors.ENDC))
 
-        ccommit = self.repo.head.commit
         cbranch = self.repo.head.reference
 
         # Checkout base commit to apply patch on
