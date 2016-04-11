@@ -455,6 +455,7 @@ class GitPhab:
         body = []
         git_fields = []
         phab_fields = []
+        updates = None
 
         # Those are common one-line git field headers
         git_headers = ['Signed-off-by:', 'Acked-by:', 'Reported-by:',
@@ -463,6 +464,10 @@ class GitPhab:
         phab_headers = ['Cc:', 'differential revision:']
 
         for line in msg.splitlines():
+            if updates is not None:
+                updates.append(line)
+                continue
+
             if not subject:
                 subject = line
                 continue
@@ -475,9 +480,31 @@ class GitPhab:
                 phab_fields.append(line)
                 continue
 
+            if line == '---':
+                updates = []
+                continue
+
             body.append(line)
 
-        return subject, body, git_fields + phab_fields
+        return subject, body, git_fields + phab_fields, updates
+
+    def strip_updates(self, msg):
+        """
+        Return msg with the part after a line containing only "---" removed.
+        This is a convention used in tools like git-am and Patchwork to
+        separate the real commit message from meta-discussion, like so:
+
+        From: Mickey Mouse <mickey@example.com>
+        Subject: Fix alignment
+
+        Previously, the text was 6px too far to the left.
+
+        Bug: http://example.com/bugs/123
+        Cc: donald@example.com
+        ---
+        v2: don't change vertical alignment, spotted in Donald's review
+        """
+        return msg.split('\n---\n', 1)[0]
 
     def format_commit_msg(self, subject, body, fields, ask=False):
         # This is the list of fields phabricator will search by default in
@@ -646,8 +673,6 @@ class GitPhab:
             arc_cmd.append('--reviewers=' + self.reviewers)
         if self.cc:
             arc_cmd.append('--cc=' + self.cc)
-        if self.message:
-            arc_cmd.append('--message=' + self.message)
         arc_cmd.append('HEAD~1')
 
         arc_failed = False
@@ -666,8 +691,18 @@ class GitPhab:
                     # phabricator fields are last, after all common git fields
                     # like 'Reviewed-by:', etc. Note that "Depends on" is not a
                     # field and is parsed from the body part.
-                    subject, body, fields = self.parse_commit_msg(
+                    subject, body, fields, updates = self.parse_commit_msg(
                         commit.message)
+
+                    local_arc_cmd = arc_cmd[:]
+
+                    if updates:
+                        # insert just before "HEAD~", which is the last
+                        # argument
+                        local_arc_cmd[-1:0] = ['--message', '\n'.join(updates)]
+                    elif self.message:
+                        local_arc_cmd[-1:0] = ['--message', self.message]
+
                     last_revision_id = self.get_differential_id(
                         self.repo.head.commit.parents[0])
                     if last_revision_id:
@@ -683,10 +718,11 @@ class GitPhab:
 
                     print("attach " + commit.hexsha)
                     try:
-                        subprocess.check_call(arc_cmd)
+                        subprocess.check_call(local_arc_cmd)
                     except:
-                        print("Command '%s' failed. Finnish rebuilding branch "
-                              "without proposing further patches" % arc_cmd)
+                        print("Command '%s' failed. Finish rebuilding branch "
+                              "without proposing further patches" %
+                              local_arc_cmd)
                         arc_failed = True
                         self.repo.head.commit = cur_orig_commit
                         summary += "Failed proposing: %s -- " \
@@ -696,8 +732,12 @@ class GitPhab:
 
                     # arc diff modified our commit message. Re-commit it with
                     # the original message, adding only the
-                    # "Differential Revision:" line.
-                    msg = commit.message
+                    # "Differential Revision:" line, and removing the
+                    # list of updates after "---" if any (now that they
+                    # have been described in Phabricator, they should not
+                    # be mentioned again).
+                    msg = self.strip_updates(commit.message)
+
                     orig_link = self.get_differential_link(commit)
                     new_link = self.get_differential_link(
                         self.repo.head.commit)
@@ -1107,7 +1147,8 @@ class GitPhab:
                 # - Add "Reviewed-by:" line
                 # - Ensure body doesn't contain blacklisted words
                 # - Ensure phabricator fields are last to make its parser happy
-                subject, body, fields = self.parse_commit_msg(
+                # - Discard updates/discussion of previous patch revisions
+                subject, body, fields, updates = self.parse_commit_msg(
                     self.repo.head.commit.message)
 
                 for r in reviewers:
