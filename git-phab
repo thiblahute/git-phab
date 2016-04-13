@@ -558,7 +558,7 @@ class GitPhab:
         return None
 
     def get_reviewers_and_tasks(self, commit):
-        reviewers = []
+        reviewers = set()
         tasks = []
 
         diffid = self.get_differential_id(commit)
@@ -586,7 +586,7 @@ class GitPhab:
             for user in reply['response']:
                 person = self.format_user(user['realName'])
                 if person:
-                    reviewers.append(person)
+                    reviewers.add(person)
 
         return reviewers, tasks
 
