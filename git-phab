@@ -20,6 +20,7 @@
 # along with this program; if not, If not, see
 # http://www.gnu.org/licenses/.
 
+import socket
 import tempfile
 import subprocess
 import argparse
@@ -35,6 +36,7 @@ import appdirs
 import phabricator
 import shutil
 
+from unidiff import PatchSet
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -67,12 +69,17 @@ class GitPhab:
 
         try:
             self.phabricator = phabricator.Phabricator()
+            # FIXME, workaround
+            # https://github.com/disqus/python-phabricator/issues/37
+            self.phabricator.differential.creatediff.api.interface[
+                "differential"]["creatediff"]["required"]["changes"] = [dict]
         except phabricator.ConfigurationError:
             if self.setup_login_certificate():
                 self.die("Try again now that the login certificate has been"
                          " added")
             else:
                 self.die("Please setup login certificate before trying again")
+        self.phab_user = self.phabricator.user.whoami()
 
     def setup_login_certificate(self):
         token = input("""LOGIN TO PHABRICATOR
@@ -643,8 +650,7 @@ Paste API Token from that page:
     def remove_ourself_from_reviewers(self):
         if self.reviewers is None:
             return
-        reply = self.phabricator.user.whoami()
-        username = reply['userName']
+        username = self.phab_user.userName
         reviewers = [r.strip() for r in self.reviewers.split(',')]
         reviewers = list(filter(lambda r: r != username, reviewers))
         self.reviewers = ','.join(reviewers)
@@ -666,16 +672,94 @@ Paste API Token from that page:
 
         return subprocess.check_output(command).decode("utf-8")
 
+    def create_diff(self, linter_status):
+        def file_len(fname):
+            try:
+                with open(fname) as f:
+                    for i, l in enumerate(f):
+                        pass
+            except FileNotFoundError:
+                return 0
+
+            return i + 1
+
+        changes = []
+        rawdiff = self.repo.git.show("HEAD", "--unified=999999999").split("\n")
+        patchset = PatchSet(rawdiff)
+        for patched_file in patchset:
+            file_length = file_len(os.path.join(
+                self.repo.working_dir, patched_file.path))
+
+            _type = 0
+            oldpath = patched_file.source_file.replace("a/", "")
+            currentpath = patched_file.path
+            if patched_file.is_added_file:
+                _type = 1
+                oldpath = None
+            elif patched_file.is_removed_file:
+                _type = 2
+                oldpath = patched_file.source_file.replace("a/", "")
+                currentpath = patched_file.source_file.replace("a/", "")
+
+            changes.append({
+                "metadata": {"line:first": 0},
+                "oldPath": oldpath,
+                "currentPath": currentpath,
+                "addLines": patched_file.added,
+                "delLines": patched_file.removed,
+                "type": _type,
+                "fileType": "1",
+                "hunks": [{
+                    # FIXME check if that is correct
+                    "oldOffset": "0" if patched_file.is_added_file else "1",
+                    "newOffset": "1" if patched_file.is_removed_file else "0",
+                    "oldLength": file_length - patched_file.added + \
+                    patched_file.removed,
+                    "newLength": file_length,
+                    "corpus": "\n".join(str(patched_file).split("\n")[3:])
+                }]
+            })
+
+        diff = self.phabricator.differential.creatediff(
+            changes=changes,
+            sourceMachine=socket.gethostname(),
+            sourcePath=self.repo.working_dir,
+            sourceControlSystem="git",
+            sourceControlPath="",
+            sourceControlBaseRevision=self.repo.head.object.parents[0].hexsha,
+            creationMethod="git-phab",
+            lintStatus=linter_status,
+            unitStatus="none",
+            parentRevisionID="",
+            authorPHID=self.phab_user.phid,
+            repositoryUUID="",
+            branch=self.branch_name,
+            repositoryPHID=self.repo_phid)
+
+        local_info = {self.repo.head.object.hexsha: {
+            "commit": self.repo.head.object.hexsha,
+            "author": self.repo.head.object.author.name,
+            "authorEmail": self.repo.head.object.author.email,
+            "summary": self.repo.head.object.message}
+        }
+
+        self.phabricator.differential.setdiffproperty(
+            diff_id=diff.diffid,
+            name="local:commits",
+            data=json.dumps(local_info))
+
+        return diff
+
     def attach_commit(self, commit):
         linter_message = None
         print("Running linters...", end="")
+        linter_status = "none"
         try:
-            linter_result = self.run_linter()
+            self.run_linter()
             print("%s OK%s" % (Colors.OKGREEN, Colors.ENDC))
-            if linter_result:
-                linter_message = "Linter results:\n\n```\n%s\n```" % (
-                    linter_result)
+            linter_status = "okay"
         except BaseException as e:
+            linter_status = "fail"
             if isinstance(e, subprocess.CalledProcessError):
                 linter_result = e.stdout.decode("utf-8")
             else:
@@ -688,6 +772,7 @@ Paste API Token from that page:
             linter_message = "**LINTER FAILURE:**\n\n```\n%s\n```" % (
                 linter_result)
 
+        diff = self.create_diff(linter_status)
         phab = self.phabricator
         print("attach " + commit.hexsha)
         subject, body, fields, updates = self.parse_commit_msg(commit.message)
@@ -698,9 +783,6 @@ Paste API Token from that page:
             body.append("Depends on D%s" % last_revision_id)
 
         fields.append("Projects: %s" % ','.join(self.project_phids))
-        diff = phab.differential.createrawdiff(
-            diff=self.repo.git.show("HEAD", "--unified=999999999"),
-            repositoryPHID=self.repo_phid)
 
         revision_id = self.get_differential_id(self.repo.head.commit)
         if revision_id:
@@ -741,7 +823,7 @@ Paste API Token from that page:
         fields = parsed_message["fields"]
         if not revision_id:
             revision = phab.differential.createrevision(fields=fields,
-                                                        diffid=diff.id)
+                                                        diffid=diff.diffid)
 
             if linter_message:
                 self.phabricator.differential.createcomment(
@@ -755,19 +837,20 @@ Paste API Token from that page:
                 message = "\n".join([u for u in updates if u])
             if not message:
                 message = self.message
-
             if not message:
                 message = self.edit_template(
                     "\n# Explain the changes you made since last "
                     " commit proposal\n")
                 message = "\n".join(message)
 
+            fields["summary"] = '\n'.join(body)
+            fields["title"] = subject
             if linter_message:
                 message += "\n\n%s" % linter_message
 
             return False, phab.differential.updaterevision(
                 id=revision_id, fields=fields,
-                diffid=diff.id, message=message)
+                diffid=diff.diffid, message=message)
 
     def do_attach(self):
         if self.repo.is_dirty():
@@ -870,7 +953,7 @@ Paste API Token from that page:
                         msg = msg + '\nDifferential Revision: ' + revision.uri
                         summary += "New: "
                     else:
-                        summary += "Updated: " + revision.uri
+                        summary += "Updated: %s " % revision.uri
 
                     self.repo.git.commit("-n", amend=True, message=msg)
 
@@ -997,7 +1080,7 @@ Paste API Token from that page:
         if diff is not None:
             reply = self.phabricator.differential.query(ids=[diff])
         else:
-            reply = self.phabricator.differential.query(phid=[phid])
+            reply = self.phabricator.differential.query(phids=[phid])
 
         assert(len(reply) == 1)
 

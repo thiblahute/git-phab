@@ -18,7 +18,7 @@ setup(
         "License :: OSI Approved :: GNU General Public License (GPL)"
     ],
     install_requires=['GitPython', 'appdirs', 'argcomplete', 'phabricator',
-                      'pre-commit'],
+                      'pre-commit', 'unidiff'],
     scripts=['git-phab'],
 )
 
