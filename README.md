@@ -48,10 +48,23 @@ Git subcommand to integrate with phabricator.
 WORKFLOW EXAMPLE
 ================
 
-First, configure where to push WIP branches:
+First, specify a personal remote repository where to push WIP branches:
 
 ```
   $ git config phab.remote xclaesse
+```
+
+Make sure the fetch URL of the repository can be accessed by the reviewers. For example if your remote is called `github`:
+
+```
+  $ git remote show github | grep URL
+    Fetch URL: git@github.com:NICK/PROJECT.git
+    Push  URL: git@github.com:NICK/PROJECT.git
+  $ git remote set-url github https://github.com/NICK/PROJECT.git
+  $ git remote set-url --push github git@github.com:NICK/PROJECT.git
+  $ git remote show github | grep URL
+    Fetch URL: https://github.com/NICK/PROJECT.git
+    Push  URL: git@github.com:NICK/PROJECT.git
 ```
 
 Before starting your work, create a branch:
