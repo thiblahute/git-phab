@@ -329,6 +329,11 @@ class GitPhab:
 
     def ensure_project_phids(self):
         reply = self.conduit("project.query", {"names": self.projects})
+
+        if not reply['response']['data']:
+            self.die("%sProjects `%s` doesn't seem to exist%s" %
+                        (Colors.FAIL, self.projects, Colors.ENDC))
+
         self.project_phids = list(reply["response"]["data"].keys())
 
         names = [p["name"].lower() for p in reply["response"]["data"].values()]
