@@ -69,7 +69,7 @@ class GitPhab:
         self.read_arcconfig()
 
         try:
-            self.phabricator = phabricator.Phabricator()
+            self.phabricator = phabricator.Phabricator(timeout=120)
             # FIXME, workaround
             # https://github.com/disqus/python-phabricator/issues/37
             self.phabricator.differential.creatediff.api.interface[
