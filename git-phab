@@ -20,6 +20,7 @@
 # along with this program; if not, If not, see
 # http://www.gnu.org/licenses/.
 
+import logging
 import socket
 import tempfile
 import subprocess
@@ -1021,9 +1022,9 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     try:
                         new, revision, diff = self.attach_commit(commit)
                     except Exception as e:
-                        print("Failed proposing patch. "
-                              "Finnish rebuilding branch "
-                              "without proposing further patches: %s" % e)
+                        logging.exception("Failed proposing patch. "
+                                          "Finnish rebuilding branch "
+                                          "without proposing further patches")
                         sys.stdout.flush()
                         patch_attachement_failure = True
                         summary += "Failed proposing: %s -- " \
