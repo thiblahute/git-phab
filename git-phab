@@ -923,7 +923,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             if not message:
                 message = self.edit_template(
                     "\n# Explain the changes you made since last "
-                    " commit proposal\n")
+                    " commit proposal\n# Last commit:\n#------\n#\n# %s" %
+                    subject)
                 message = "\n".join(message)
 
             fields["summary"] = '\n'.join(body)
