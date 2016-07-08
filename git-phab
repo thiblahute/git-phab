@@ -30,6 +30,7 @@ from datetime import datetime
 import git
 import os
 import re
+import stat
 import sys
 import json
 
@@ -679,7 +680,7 @@ Paste API Token from that page:
                 with open(fname) as f:
                     for i, l in enumerate(f):
                         pass
-            except FileNotFoundError:
+            except (FileNotFoundError, IsADirectoryError):
                 return 0
 
             return i + 1
@@ -693,10 +694,19 @@ Paste API Token from that page:
 
             _type = 0
             oldpath = patched_file.source_file.replace("a/", "")
+            patch_lines = str(patched_file).split("\n")
             currentpath = patched_file.path
+            old_properties = {}
+            new_properties = {}
             if patched_file.is_added_file:
                 _type = 1
                 oldpath = None
+                if os.path.isdir(patched_file.path):
+                    # Submodule
+                    new_properties["unix:filemode"] = "160000"
+                else:
+                    mode = oct(os.stat(patched_file.path)[stat.ST_MODE])
+                    new_properties["unix:filemode"] = mode[2:]
             elif patched_file.is_removed_file:
                 _type = 2
                 oldpath = patched_file.source_file.replace("a/", "")
@@ -704,6 +714,8 @@ Paste API Token from that page:
 
             changes.append({
                 "metadata": {"line:first": 0},
+                "oldProperties": old_properties,
+                "newProperties": new_properties,
                 "oldPath": oldpath,
                 "currentPath": currentpath,
                 "addLines": patched_file.added,
@@ -714,10 +726,10 @@ Paste API Token from that page:
                     # FIXME check if that is correct
                     "oldOffset": "0" if patched_file.is_added_file else "1",
                     "newOffset": "1" if patched_file.is_removed_file else "0",
-                    "oldLength": file_length - patched_file.added + \
-                    patched_file.removed,
+                    "oldLength": max(0, file_length - patched_file.added + \
+                                     patched_file.removed),
                     "newLength": file_length,
-                    "corpus": "\n".join(str(patched_file).split("\n")[3:])
+                    "corpus": "\n".join(patch_lines[3:])
                 }]
             })
 
@@ -841,7 +853,8 @@ Paste API Token from that page:
             if not message:
                 message = self.edit_template(
                     "\n# Explain the changes you made since last "
-                    " commit proposal\n# Last commit:\n#------\n#\n# %s" % subject)
+                    " commit proposal\n# Last commit:\n#------\n#\n# %s" %
+                    subject)
                 message = "\n".join(message)
 
             fields["summary"] = '\n'.join(body)
