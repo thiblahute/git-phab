@@ -674,6 +674,72 @@ Paste API Token from that page:
 
         return subprocess.check_output(command).decode("utf-8")
 
+    def get_changes(old_properties, new_properties,
+                    oldpath, currentpath,
+                    added_lines, removed_lines,
+                    _type, filetype,
+                    old_offset, new_offset,
+                    old_length, new_length,
+                    corpus):
+        return {"metadata": {"line:first": 0},
+                "oldProperties": old_properties,
+                "newProperties": new_properties,
+                "oldPath": oldpath,
+                "currentPath": currentpath,
+                "addLines": added_lines,
+                "delLines": removed_lines,
+                "type": _type,
+                "fileType": "1",
+                "hunks": [{
+                    # FIXME check if that is correct
+                    "oldOffset": old_offset,
+                    "newOffset": new_offset,
+                    "oldLength": old_length
+                    "newLength": new_length,
+                    "corpus": corpus
+                }]
+            }
+
+    def get_changes_for_patched_file(self, patched_file):
+        file_length = file_len(os.path.join(
+            self.repo.working_dir, patched_file.path))
+
+        _type = 0
+        extra_change = None
+        oldpath = patched_file.source_file.replace("a/", "")
+        patch_lines = str(patched_file).split("\n")
+        currentpath = patched_file.path
+        old_properties = {}
+        new_properties = {}
+        if patched_file.is_added_file:
+            _type = 1
+            oldpath = None
+            if os.path.isdir(patched_file.path):
+                # Submodule
+                new_properties["unix:filemode"] = "160000"
+            else:
+                mode = oct(os.stat(patched_file.path)[stat.ST_MODE])
+                new_properties["unix:filemode"] = mode[2:]
+        elif patched_file.is_removed_file:
+            _type = 2
+            oldpath = patched_file.source_file.replace("a/", "")
+            currentpath = patched_file.source_file.replace("a/", "")
+        elif patched_file.is_renamed_file:
+            _type = 6
+
+        changes = [self.get_changes(
+            old_properties, new_properties,
+            oldpath, currentpath,
+            patched_file.added, patched_file.removed,
+            _type,
+            "0" if patched_file.is_added_file else "1",
+            "1" if patched_file.is_removed_file else "0",
+            max(0, file_length - patched_file.added + patched_file.removed),
+            file_length,
+            "\n".join(patch_lines[3:]))]
+
+        if extra_change:
+
     def create_diff(self, linter_status):
         def file_len(fname):
             try:
@@ -689,49 +755,7 @@ Paste API Token from that page:
         rawdiff = self.repo.git.show("HEAD", "--unified=999999999").split("\n")
         patchset = PatchSet(rawdiff)
         for patched_file in patchset:
-            file_length = file_len(os.path.join(
-                self.repo.working_dir, patched_file.path))
-
-            _type = 0
-            oldpath = patched_file.source_file.replace("a/", "")
-            patch_lines = str(patched_file).split("\n")
-            currentpath = patched_file.path
-            old_properties = {}
-            new_properties = {}
-            if patched_file.is_added_file:
-                _type = 1
-                oldpath = None
-                if os.path.isdir(patched_file.path):
-                    # Submodule
-                    new_properties["unix:filemode"] = "160000"
-                else:
-                    mode = oct(os.stat(patched_file.path)[stat.ST_MODE])
-                    new_properties["unix:filemode"] = mode[2:]
-            elif patched_file.is_removed_file:
-                _type = 2
-                oldpath = patched_file.source_file.replace("a/", "")
-                currentpath = patched_file.source_file.replace("a/", "")
-
-            changes.append({
-                "metadata": {"line:first": 0},
-                "oldProperties": old_properties,
-                "newProperties": new_properties,
-                "oldPath": oldpath,
-                "currentPath": currentpath,
-                "addLines": patched_file.added,
-                "delLines": patched_file.removed,
-                "type": _type,
-                "fileType": "1",
-                "hunks": [{
-                    # FIXME check if that is correct
-                    "oldOffset": "0" if patched_file.is_added_file else "1",
-                    "newOffset": "1" if patched_file.is_removed_file else "0",
-                    "oldLength": max(0, file_length - patched_file.added + \
-                                     patched_file.removed),
-                    "newLength": file_length,
-                    "corpus": "\n".join(patch_lines[3:])
-                }]
-            })
+            changes.extend(self.get_changes_for_patched_file(patched_file)
 
         diff = self.phabricator.differential.creatediff(
             changes=changes,
