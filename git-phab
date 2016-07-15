@@ -27,6 +27,7 @@ import argparse
 import argcomplete
 from datetime import datetime
 import git
+import gitdb
 import os
 import re
 import sys
@@ -910,10 +911,17 @@ class GitPhab:
         handle, filename = tempfile.mkstemp(".patch", "git-phab-")
         f = os.fdopen(handle, "w")
 
-        f.write("Date: {} +0000\n".format(date))
+        commit_hash = None
+        for key in diff["properties"]["local:commits"].keys():
+            commit_hash = diff["properties"]["local:commits"][key].get("commit")
+            if commit_hash:
+                f.write("From: %s Mon Sep 17 00:00:00 2001\n" % commit_hash)
+                break
+
         f.write("From: {} <{}>\n".format(
             diff['authorName'],
             diff['authorEmail']))
+        f.write("Date: {} +0000\n".format(date))
         f.write("Subject: {}\n\n".format(revision['title']))
 
         # Drop the arc insert Depends on Dxxxx line if needed
@@ -935,14 +943,39 @@ class GitPhab:
 
         return filename
 
-    def am_patch(self, filename):
+    def am_patch(self, filename, base_commit):
         try:
             self.repo.git.am(filename)
+            return
         except git.exc.GitCommandError as e:
-            print(e)
             self.repo.git.am("--abort")
-            self.die("{}git am failed, aborting{}".format(
-                Colors.FAIL, Colors.ENDC))
+            if not base_commit:
+                print(e)
+                self.die("{}git am failed, aborting{}".format(
+                    Colors.FAIL, Colors.ENDC))
+
+        ccommit = self.repo.head.commit
+        cbranch = self.repo.head.reference
+
+        # Checkout base commit to apply patch on
+        try:
+            self.repo.head.reference = self.repo.commit(base_commit)
+        except gitdb.exc.BadObject:
+            self.die("%sCould not apply patch %s from %s (even on base commit %s), aborting%s"
+                   % (Colors.FAIL, filename, self.differential, base_commit,
+                      Colors.ENDC))
+        self.repo.head.reset(index=True, working_tree=True)
+
+        # Apply the patch on it
+        self.repo.git.am(filename)
+        new_commit = self.repo.head.commit
+
+        # Go back to previous branch
+        self.repo.head.reference = cbranch
+        self.repo.head.reset(index=True, working_tree=True)
+
+        # And try to cherry pick on patch
+        self.repo.git.cherry_pick(new_commit.hexsha)
 
     def do_cherry_pick(self):
         if self.repo.is_dirty():
@@ -960,7 +993,7 @@ class GitPhab:
         if self.output_directory:
             self.move_to_output_directory(revision, diff, filename)
         else:
-            self.am_patch(filename)
+            self.am_patch(filename, diff.get("sourceControlBaseRevision"))
         os.unlink(filename)
 
     def do_merge(self):
