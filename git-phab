@@ -349,7 +349,9 @@ class GitPhab:
         try:
             self.repo.remote(self.remote)
         except:
-            self.die("%s not a valid remote. Aborting." % self.remote)
+            print("%s%s not a valid remote, can't use it%s." % (
+                Colors.HEADER, self.remote, Colors.ENDC))
+            return
 
         # Get remote's fetch URL. Unfortunately we can't get it from config
         # using remote.config_reader.get('url') otherwise it won't rewrite the
