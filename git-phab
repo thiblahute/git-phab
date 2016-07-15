@@ -914,7 +914,12 @@ class GitPhab:
         f = os.fdopen(handle, "w")
 
         commit_hash = None
-        for key in diff["properties"]["local:commits"].keys():
+        try:
+            keys = diff["properties"]["local:commits"].keys()
+        except TypeError:
+            keys = []
+
+        for key in keys:
             commit_hash = diff["properties"]["local:commits"][key].get("commit")
             if commit_hash:
                 f.write("From: %s Mon Sep 17 00:00:00 2001\n" % commit_hash)
