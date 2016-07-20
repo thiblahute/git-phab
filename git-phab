@@ -1184,17 +1184,32 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         f = os.fdopen(handle, "w")
 
         commit_hash = None
+        local_commits = diff["properties"]["local:commits"]
         try:
-            keys = diff["properties"]["local:commits"].keys()
+            keys = [k for k in local_commits.keys()]
         except TypeError:
             keys = []
 
-        for key in keys:
-            commit_hash = diff["properties"]["local:commits"][key].get(
-                "commit")
+        if len(keys) > 1:
+            self.die("%sRevision %s names several commits, "
+                     "in git-phab workflow, 1 revision == 1 commit."
+                     " We can't cherry-pick that revision.%s"
+                     % (Colors.FAIL, revision.id, Colors.ENDC))
+
+        if keys:
+            local_infos = local_commits[keys[0]]
+
+            raw_commit = local_infos.get("raw_commit")
+            # Use the raw_commit as set by git-phab when providing the patch
+            if raw_commit:
+                f.write(raw_commit)
+                f.close()
+                return filename
+
+            # Try to rebuild the commit
+            commit_hash = local_infos.get("commit")
             if commit_hash:
                 f.write("From: %s Mon Sep 17 00:00:00 2001\n" % commit_hash)
-                break
 
         f.write("From: {} <{}>\n".format(
             diff['authorName'],
