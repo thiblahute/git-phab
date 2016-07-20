@@ -3,7 +3,11 @@ import sys
 
 from setuptools import setup
 
-setup_requires=['pre-commit']
+setup_requires = []
+if "upload" in sys.argv:
+    setup_requires=['setuptools-markdown'],
+else:
+    setup_requires=['pre-commit']
 
 setup(
     name="git-phab",
