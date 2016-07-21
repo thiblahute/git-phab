@@ -329,19 +329,29 @@ class GitPhab:
                       separators=(',', ': '))
 
     def ensure_project_phids(self):
-        reply = self.conduit("project.query", {"names": self.projects})
+        by_names = self.conduit("project.query", {"names": self.projects})
+        by_slugs = self.conduit("project.query", {"slugs": self.projects})
 
-        if not reply['response']['data']:
-            self.die("%sProjects `%s` doesn't seem to exist%s" %
-                        (Colors.FAIL, self.projects, Colors.ENDC))
+        self.project_phids = []
+        project_map = {}
 
-        self.project_phids = list(reply["response"]["data"].keys())
+        for reply in (by_names, by_slugs):
+            if not reply["response"]["data"]:
+                continue
+            for (phid, data) in reply["response"]["data"].items():
+                project_map[data["name"].lower()] = phid
+                for s in data["slugs"]:
+                    project_map[s.lower()] = phid
 
-        names = [p["name"].lower() for p in reply["response"]["data"].values()]
-        for p in self.projects:
-            if p not in names:
-                self.die("%sProject `%s` doesn't seem to exist%s" %
-                         (Colors.FAIL, p, Colors.ENDC))
+        try:
+            for p in self.projects:
+                if p not in project_map:
+                    print("%sProject `%s` doesn't seem to exist%s" %
+                          (Colors.FAIL, p, Colors.ENDC))
+                    raise
+                self.project_phids.append(project_map[p])
+        except:
+            self.die("Failed to look up projects in Phabricator")
 
     def validate_remote(self):
         # If a remote is setup ensure that it's valid
