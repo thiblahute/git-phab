@@ -993,13 +993,13 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         # are trying to attach the first commit in the repository, so avoid
         # trying to get its parent.
         commits = self.get_commits(self.revision_range)
-
         if len(commits[-1].parents) > 0:
             s = commits[-1].hexsha + "^..HEAD"
+            all_commits = list(self.repo.iter_commits(s))
         else:
-            s = commits[-1].hexsha
-
-        all_commits = list(self.repo.iter_commits(s))
+            s = commits[-1].hexsha + ".."
+            all_commits = list(self.repo.iter_commits(s))
+            all_commits.append(commits[-1])
 
         # Sanity checks
         for c in commits:
@@ -1049,7 +1049,10 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             print("Moving to starting point")
             if len(commits[-1].parents) > 0:
                 self.repo.head.reference = commits[-1].parents[0]
-                self.repo.head.reset(index=True, working_tree=True)
+            else:
+                self.repo.head.reference = commits[-1]
+
+            self.repo.head.reset(index=True, working_tree=True)
 
             for commit in reversed(all_commits):
                 if len(commit.parents) > 0:
