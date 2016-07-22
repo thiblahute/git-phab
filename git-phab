@@ -20,6 +20,7 @@
 # along with this program; if not, If not, see
 # http://www.gnu.org/licenses/.
 
+import base64
 import logging
 import socket
 import tempfile
@@ -727,8 +728,11 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
             properties["unix:filemode"] = m
 
-        file_length = file_len(os.path.join(
-            self.repo.working_dir, diff.b_path))
+        is_text = diff.b_blob.mime_type.startswith(
+            "text/") if diff.b_blob else True
+        if is_text:
+            file_length = file_len(os.path.join(
+                self.repo.working_dir, diff.b_path))
 
         _type = 0
         oldpath = diff.a_path
@@ -755,7 +759,31 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             elif l.startswith("-"):
                 removed_lines += 1
 
-        return {"metadata": {"line:first": 0},
+        if is_text:
+            metadata = {"line:first": 0}
+            hunks = [{
+                "oldOffset": "0" if diff.new_file else "1",
+                "newOffset": "1" if diff.deleted_file else "0",
+                "oldLength": max(0, file_length - added_lines + removed_lines),
+                "newLength": file_length,
+                "corpus": "\n".join(patch_lines[1:])
+            }]
+            filetype = "1"
+        else:
+            hunks = []
+            phab_file = self.phabricator.file.upload(
+                data_base64=base64.standard_b64encode(
+                    diff.b_blob.data_stream[-1].read()).decode("utf-8"))
+
+            filetype = "3"
+            metadata = {
+                "old:file:size": diff.a_blob.size if diff.a_blob else 0,
+                "new:file:size": diff.b_blob.size if diff.b_blob else 0,
+                "new:file:mime-type": diff.b_blob.mime_type,
+                "new:binary-phid": phab_file.response
+            }
+
+        return {"metadata": metadata,
                 "oldProperties": old_properties,
                 "newProperties": new_properties,
                 "oldPath": oldpath,
@@ -763,34 +791,30 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 "addLines": added_lines,
                 "delLines": removed_lines,
                 "type": _type,
-                "fileType": "1",
-                "hunks": [{
-                    # FIXME check if that is correct
-                    "oldOffset": "0" if diff.new_file else "1",
-                    "newOffset": "1" if diff.deleted_file else "0",
-                    "oldLength": max(
-                        0, file_length - added_lines + removed_lines),
-                    "newLength": file_length,
-                    "corpus": "\n".join(patch_lines[1:])
-                }]
+                "fileType": filetype,
+                "hunks": hunks
                 }
 
-    def create_diff(self, linter_status):
-        changes = []
-        if self.repo.head.object.parents:
-            diffs = self.repo.head.object.parents[0].diff(create_patch=True,
-                                                          unified=999999999)
+    def get_git_diffs(self, commit):
+        if commit.parents:
+            diffs = commit.parents[0].diff(
+                create_patch=True, unified=999999999)
         else:
-            diffs = self.repo.head.object.diff(git.diff.NULL_TREE,
-                                               create_patch=True,
-                                               unified=999999999)
+            diffs = commit.diff(git.diff.NULL_TREE if
+                                hasattr(git.diff, "NULL_TREE") else "root",
+                                create_patch=True,
+                                unified=999999999)
+        return diffs
+
+    def create_diff(self, commit, linter_status):
+        changes = []
+        parent_commit = ""
+        diffs = self.get_git_diffs(commit)
+        if commit.parents:
+            parent_commit = self.repo.head.object.parents[0].hexsha
 
         for diff in diffs:
             changes.append(self.get_changes_for_diff(diff))
-
-        parent_commit = ""
-        if len(self.repo.head.object.parents) > 0:
-            parent_commit = self.repo.head.object.parents[0].hexsha
 
         diff = self.phabricator.differential.creatediff(
             changes=changes,
@@ -820,10 +844,22 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 "author": commit.author.name,
                 "authorEmail": commit.author.email,
                 "message": commit.message,
-                "raw_commit": self.repo.git.format_patch(
-                    "-1", "--stdout", commit.hexsha)
             }
         }
+
+        diffs = self.get_git_diffs(commit)
+        has_binary = False
+        for d in diffs:
+            if d.b_blob and not d.b_blob.mime_type.startswith(
+                    "text/"):
+                has_binary = True
+                break
+
+        if not has_binary:
+            commit_infos[commit.hexsha]["raw_commit"] = \
+                self.repo.git.format_patch("-1", "--stdout",
+                                           commit.hexsha)
+
         self.phabricator.differential.setdiffproperty(
             diff_id=diff.diffid,
             name="local:commits",
@@ -851,7 +887,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             linter_message = "**LINTER FAILURE:**\n\n```\n%s\n```" % (
                 linter_result)
 
-        diff = self.create_diff(linter_status)
+        diff = self.create_diff(commit, linter_status)
         phab = self.phabricator
         print("attach " + commit.hexsha)
         subject, body, fields, updates = self.parse_commit_msg(commit.message)
