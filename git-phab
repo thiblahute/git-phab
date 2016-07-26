@@ -58,13 +58,15 @@ class GitPhab:
 
     def __init__(self):
         self.task = None
+        self.task_or_revision = None
         self.remote = None
         self.assume_yes = False
         self.reviewers = None
         self.cc = None
         self.projects = None
         self.output_directory = None
-        self.repo_phid = None
+        self.phab_repo = None
+        self.staging_url = None
 
         self.repo = git.Repo(os.getcwd(), search_parent_directories=True)
         self.read_arcconfig()
@@ -196,6 +198,11 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
     def task_from_branchname(self, bname):
         # Match 'foo/bar/T123-description'
         m = re.fullmatch('(.+/)?(T[0-9]+)(-.*)?', bname)
+        return m.group(2) if m else None
+
+    def revision_from_branchname(self, bname):
+        # Match 'foo/bar/D123-description'
+        m = re.fullmatch('(.+/)?(D[0-9]+)(-.*)?', bname)
         return m.group(2) if m else None
 
     def get_commits(self, revision_range):
@@ -485,6 +492,15 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             self.die("Task '%s' is not in the correct format. "
                      "Expecting 'T123'." % self.task)
 
+        if self.task_or_revision:
+            if re.fullmatch('T[0-9]*', self.task_or_revision):
+                self.task = self.task_or_revision
+            elif re.fullmatch('D[0-9]*', self.task_or_revision):
+                self.differential = self.task_or_revision
+            else:
+                self.die("Task or revision '%s' is not in the correct format. "
+                         "Expecting 'T123' or 'D123'." % self.task_or_revision)
+
         if hasattr(self, 'revision_range') and not self.revision_range:
             tracking = self.repo.head.reference.tracking_branch()
             if not tracking:
@@ -520,21 +536,24 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             reply = self.phabricator.repository.query(
                 callsigns=[self.arcconfig["repository.callsign"]])
             assert(len(reply) == 1)
-            self.repo_phid = reply[0]["phid"]
+            self.phab_repo = reply[0]
         else:
 
             for phab_repo in self.phabricator.repository.query():
-                if self.repo_phid:
+                if self.phab_repo:
                     break
 
                 for remote in self.repo.remotes:
                     if phab_repo['remoteURI'] == remote.url:
-                        self.repo_phid = phab_repo["phid"]
+                        self.phab_repo = phab_repo
                         break
 
-        if not self.repo_phid:
+        if not self.phab_repo:
             self.die("Could not determine Phabricator repository\n"
                      "You should set 'repository.callsign' in '.arcconfig'")
+
+        if self.phab_repo.get("staging"):
+            self.staging_url = self.phab_repo.get("staging").get("uri")
 
     def line_in_headers(self, line, headers):
         for header in headers:
@@ -830,9 +849,26 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             authorPHID=self.phab_user.phid,
             repositoryUUID="",
             branch=self.branch_name,
-            repositoryPHID=self.repo_phid)
+            repositoryPHID=self.phab_repo["phid"])
 
         return diff
+
+    def push_diff_to_staging(self, diff, commit):
+        if not self.staging_url:
+            print("%sNo staging repo set, not pushing diff%s" % (
+                Colors.ERROR, diff.diff, Colors.ENDC))
+            return
+
+        print("Pushing diff %d on the staging repo... " % diff.diffid, end='')
+        try:
+            self.repo.git.push(
+                self.staging_url, "%s:refs/tags/phabricator/diff/%s" % (
+                    commit.hexsha, diff.diffid))
+            print("%sOK%s" % (Colors.OKGREEN, Colors.ENDC))
+        except git.exc.GitCommandError as e:
+            print("%sERROR %s(%s)" % (Colors.FAIL,
+                                      Colors.ENDC,
+                                      e.stderr.decode("utf-8")))
 
     def update_local_commit_info(self, diff, commit):
         commit_infos = {
@@ -855,7 +891,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 has_binary = True
                 break
 
-        if not has_binary:
+        if not has_binary and not self.staging_url:
             commit_infos[commit.hexsha]["raw_commit"] = \
                 self.repo.git.format_patch("-1", "--stdout",
                                            commit.hexsha)
@@ -1083,6 +1119,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
                     self.repo.git.commit("-n", amend=True, message=msg)
                     self.update_local_commit_info(diff, self.repo.head.object)
+                    self.push_diff_to_staging(diff, self.repo.head.object)
 
                     summary += self.format_commit(self.repo.head.commit) + "\n"
                 else:
@@ -1306,6 +1343,21 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         # And try to cherry pick on patch
         self.repo.git.cherry_pick(new_commit.hexsha)
 
+    def fetch_staging_commits(self, diff):
+        if not self.staging_url:
+            print("No staging URL")
+            return False
+
+        try:
+            self.repo.git.fetch(
+                self.staging_url, "refs/tags/phabricator/diff/%s" %
+                diff["id"])
+        except git.exc.GitCommandError as e:
+            print(e)
+            return False
+
+        return True
+
     def do_cherry_pick(self):
         if self.repo.is_dirty():
             self.die("Repository is dirty. Aborting.")
@@ -1314,6 +1366,10 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         did = self.differential.strip("D")
 
         revision, diff = self.get_revision_and_diff(diff=did)
+
+        if self.fetch_staging_commits(diff):
+            self.repo.git.cherry_pick("FETCH_HEAD")
+            return
 
         if self.has_been_applied(revision):
             self.die("{} was already applied\n".format(self.differential))
@@ -1391,16 +1447,34 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         self.fetch()
 
-    def do_checkout(self):
-        if not self.task:
-            self.die("No task provided. Aborting.")
+    def fetch_from_revision(self):
+        did = self.differential.strip("D")
 
-        commit, remote_branch_name = self.fetch()
+        revision, diff = self.get_revision_and_diff(diff=did)
+
+        if not self.fetch_staging_commits(diff):
+            self.die("Could not fetch revision %s from staging"
+                     " repository" % self.differential)
+
+        return self.repo.rev_parse("FETCH_HEAD"), self.differential
+
+    def do_checkout(self):
+        if not self.differential and not self.task:
+            self.die("No task or revision provided. Aborting.")
+
+        if self.differential:
+            commit, remote_branch_name = self.fetch_from_revision()
+            branchname_match_method = self.revision_from_branchname
+            branch_name = self.differential
+        else:
+            commit, remote_branch_name = self.fetch()
+            branchname_match_method = self.task_from_branchname
+            branch_name = self.task
 
         # Lookup for an existing branch for this task
         branch = None
         for b in self.repo.branches:
-            if self.task_from_branchname(b.name) == self.task:
+            if branchname_match_method(b.name) == branch_name:
                 branch = b
                 break
 
@@ -1667,8 +1741,8 @@ if __name__ == '__main__':
     checkout_parser = subparsers.add_parser(
         'checkout', help="Checkout a task's branch")
     checkout_parser.add_argument(
-        'task', metavar='<T123>', nargs='?',
-        help="The task to checkout") \
+        'task_or_revision', metavar='<T123>', nargs='?',
+        help="The task or revision to checkout") \
         .completer = DisabledCompleter
 
     browse_parser = subparsers.add_parser(
