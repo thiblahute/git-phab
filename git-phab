@@ -1416,7 +1416,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 self.move_to_output_directory(r, d, filename, n)
             else:
                 print("Applying D{}".format(r['id']))
-                self.am_patch(filename)
+                self.am_patch(filename, d.get("sourceControlBaseRevision"))
             os.unlink(filename)
             n += 1
 
