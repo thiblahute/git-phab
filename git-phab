@@ -45,7 +45,7 @@ from urllib.parse import urlsplit, urlunsplit
 ON_WINDOWS = os.name == 'nt'
 
 
-class Colors(object):
+class Colors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKGREEN = '\033[92m'
@@ -53,11 +53,35 @@ class Colors(object):
     FAIL = '\033[91m'
     ENDC = '\033[0m'
 
+    force_disable = False
+
+    @classmethod
+    def disable(cls):
+        cls.HEADER = ''
+        cls.OKBLUE = ''
+        cls.OKGREEN = ''
+        cls.WARNING = ''
+        cls.FAIL = ''
+        cls.ENDC = ''
+
+    @classmethod
+    def enable(cls):
+        if cls.force_disable:
+            return
+
+        cls.HEADER = '\033[95m'
+        cls.OKBLUE = '\033[94m'
+        cls.OKGREEN = '\033[92m'
+        cls.WARNING = '\033[93m'
+        cls.FAIL = '\033[91m'
+        cls.ENDC = '\033[0m'
+
 
 class GitPhab:
 
     def __init__(self):
         self.task = None
+        self.differential = None
         self.task_or_revision = None
         self.remote = None
         self.assume_yes = False
@@ -175,14 +199,19 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         with open(filename, 'r') as f:
             return [l for l in f.readlines() if not l.startswith("#")]
 
-    def create_task(self):
+    def create_task(self, commits):
         task_infos = None
         while not task_infos:
-            task_infos = self.edit_template(
-                "\n"
-                "# Merge branch: %s\n"
-                "# Please enter a task title and description for the merge "
-                "request" % self.repo.active_branch.name)
+            template = "\n# Please enter a task title and description " \
+                "for the merge request.\n" \
+                "# Commits from branch: %s:" % self.repo.active_branch.name
+
+            Colors.disable()
+            for c in commits:
+                template += "\n# - %s" % self.format_commit(c)
+            Colors.enable()
+
+            task_infos = self.edit_template(template)
 
         description = ""
         title = task_infos[0]
@@ -857,8 +886,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
     def push_diff_to_staging(self, diff, commit):
         if not self.staging_url:
-            print("    * %sNo staging repo set, not pushing diff%s" % (
-                Colors.FAIL, diff.diff, Colors.ENDC))
+            print("    * %sNo staging repo set, not pushing diff %s%s" % (
+                Colors.FAIL, diff.diffid, Colors.ENDC))
             return
 
         print("    * Pushing diff %d on the staging repo... " %
@@ -1072,7 +1101,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         if self.task == "T":
             try:
-                self.task = self.create_task()["objectName"]
+                self.task = self.create_task(commits)["objectName"]
                 summary += "  * New: task %s\n" % self.task
             except KeyError:
                 self.die("Could not create task.")
