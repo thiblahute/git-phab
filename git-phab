@@ -835,7 +835,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         for diff in diffs:
             changes.append(self.get_changes_for_diff(diff))
 
-        print("Attaching commit %s... " % commit.hexsha, end="")
+        print("    * Pushing new diff... ", end='')
         diff = self.phabricator.differential.creatediff(
             changes=changes,
             sourceMachine=socket.gethostname(),
@@ -851,17 +851,17 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             repositoryUUID="",
             branch=self.branch_name,
             repositoryPHID=self.phab_repo["phid"])
-        print("%s OK%s" % (Colors.OKGREEN, Colors.ENDC))
+        print("%sOK%s" % (Colors.OKGREEN, Colors.ENDC))
 
         return diff
 
     def push_diff_to_staging(self, diff, commit):
         if not self.staging_url:
-            print("%sNo staging repo set, not pushing diff%s" % (
+            print("    * %sNo staging repo set, not pushing diff%s" % (
                 Colors.ERROR, diff.diff, Colors.ENDC))
             return
 
-        print("Pushing diff %d on the staging repo... " % diff.diffid, end='')
+        print("    * Pushing diff %d on the staging repo... " % diff.diffid, end='')
         try:
             self.repo.git.push(
                 self.staging_url, "%s:refs/tags/phabricator/diff/%s" % (
@@ -905,7 +905,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
     def attach_commit(self, commit):
         linter_message = None
-        print("Running linters...", end="")
+        print("    * Running linters...", end="")
         linter_status = "none"
         try:
             self.run_linter()
@@ -1047,7 +1047,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         self.filter_already_proposed_commits(commits, all_commits)
         if not commits:
-            print("Everything has already been proposed")
+            print("-> Everything has already been proposed")
             return
 
         # Ask confirmation before doing any harm
@@ -1066,13 +1066,13 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             agreed = self.prompt("Attach above commits?")
 
         if not agreed:
-            print("Aborting")
+            print("-> Aborting")
             sys.exit(0)
 
         if self.task == "T":
             try:
                 self.task = self.create_task()["objectName"]
-                summary += "New: task %s\n" % self.task
+                summary += "  * New: task %s\n" % self.task
             except KeyError:
                 self.die("Could not create task.")
 
@@ -1083,12 +1083,10 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         try:
             # Detach HEAD from the branch; this gives a cleaner reflog for the
             # branch
-            print("Moving to starting point")
             if len(commits[-1].parents) > 0:
                 self.repo.head.reference = commits[-1].parents[0]
             else:
                 self.repo.head.reference = commits[-1]
-
             self.repo.head.reset(index=True, working_tree=True)
 
             for commit in reversed(all_commits):
@@ -1096,6 +1094,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     self.repo.git.cherry_pick(commit.hexsha)
 
                 if not patch_attachement_failure and commit in commits:
+                    print("-> Attaching %s:" % self.format_commit(commit))
                     try:
                         new, revision, diff = self.attach_commit(commit)
                     except Exception as e:
@@ -1104,7 +1103,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                                           "without proposing further patches")
                         sys.stdout.flush()
                         patch_attachement_failure = True
-                        summary += "Failed proposing: %s -- " \
+                        summary += "  * Failed proposing: %s -- " \
                             "NO MORE PATCH PROPOSED\n" % self.format_commit(
                                 self.repo.head.commit)
                         continue
@@ -1114,23 +1113,24 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     # Add the "Differential Revision:" line.
                     if new:
                         msg = msg + '\nDifferential Revision: ' + revision.uri
-                        summary += "New: "
+                        summary += "  * New: "
                     else:
-                        summary += "Updated: %s " % revision.uri
+                        summary += "  * Updated: %s " % revision.uri
 
                     self.repo.git.commit("-n", amend=True, message=msg)
                     self.update_local_commit_info(diff, self.repo.head.object)
                     self.push_diff_to_staging(diff, self.repo.head.object)
+                    print("%s-> OK%s" % (Colors.OKGREEN, Colors.ENDC))
 
                     summary += self.format_commit(self.repo.head.commit) + "\n"
                 else:
-                    print("pick " + commit.hexsha)
-                    summary += "Picked: %s\n" % self.format_commit(commit)
+                    print("-> pick " + commit.hexsha)
+                    summary += "  * Picked: %s\n" % self.format_commit(commit)
 
             orig_branch.commit = self.repo.head.commit
             self.repo.head.reference = orig_branch
         except:
-            print("Cleaning up back to original state on error")
+            print("-> Cleaning up back to original state on error")
             self.repo.head.commit = orig_commit
             orig_branch.commit = orig_commit
             self.repo.head.reference = orig_branch
@@ -1145,10 +1145,10 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     info = remote.push('HEAD:refs/heads/' + branch,
                                        force=True)[0]
                     if not info.flags & info.ERROR:
-                        summary += "Branch pushed to %s/%s\n" % (remote,
+                        summary += "  * Branch pushed to %s/%s\n" % (remote,
                                                                  branch)
                     else:
-                        print("Could not push branch %s/%s: %s" % (
+                        print("-> Could not push branch %s/%s: %s" % (
                             remote, branch, info.summary))
 
                 uri = "%s#%s" % (self.remote_url, branch)
@@ -1157,11 +1157,11 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                         id=int(self.task[1:]),
                         auxiliary={"std:maniphest:git:uri-branch": uri})
                 except:
-                    print("Failed to set std:maniphest:git:uri-branch to %s"
+                    print("-> Failed to set std:maniphest:git:uri-branch to %s"
                           % uri)
 
             except Exception as e:
-                summary += "Failed: push wip branch: %s\n" % e
+                summary += "  * Failed: push wip branch: %s\n" % e
 
         if self.task and not self.branch_task:
             # Check if we already have a branch for this task
@@ -1177,7 +1177,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 if self.prompt('Reset branch %s to what has just been sent '
                                'to phabricator?' % branch.name):
                     branch.commit = self.repo.head.commit
-                    summary += "Branch %s reset to %s\n" % \
+                    summary += "  * Branch %s reset to %s\n" % \
                                (branch.name, branch.commit)
             else:
                 new_bname = self.branch_name_with_task()
@@ -1185,7 +1185,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     if self.prompt("Rename current branch to '%s'?" %
                                    new_bname):
                         self.repo.head.reference.rename(new_bname)
-                        summary += "Branch renamed to %s\n" % new_bname
+                        summary += "  * Branch renamed to %s\n" % new_bname
                 else:
                     # Current branch is probably something like 'master' or
                     # 'gnome-3-18', better create a new branch than renaming.
@@ -1197,7 +1197,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                             new_branch.set_tracking_branch(tracking)
                         new_branch.checkout()
 
-                        summary += "Branch %s created and checked out\n" % \
+                        summary += "  * Branch %s created and checked out\n" % \
                                    new_bname
 
         print("\n\nSummary:")
