@@ -858,10 +858,11 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
     def push_diff_to_staging(self, diff, commit):
         if not self.staging_url:
             print("    * %sNo staging repo set, not pushing diff%s" % (
-                Colors.ERROR, diff.diff, Colors.ENDC))
+                Colors.FAIL, diff.diff, Colors.ENDC))
             return
 
-        print("    * Pushing diff %d on the staging repo... " % diff.diffid, end='')
+        print("    * Pushing diff %d on the staging repo... " %
+              diff.diffid, end='')
         try:
             self.repo.git.push(
                 self.staging_url, "%s:refs/tags/phabricator/diff/%s" % (
@@ -1146,7 +1147,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                                        force=True)[0]
                     if not info.flags & info.ERROR:
                         summary += "  * Branch pushed to %s/%s\n" % (remote,
-                                                                 branch)
+                                                                     branch)
                     else:
                         print("-> Could not push branch %s/%s: %s" % (
                             remote, branch, info.summary))
@@ -1197,8 +1198,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                             new_branch.set_tracking_branch(tracking)
                         new_branch.checkout()
 
-                        summary += "  * Branch %s created and checked out\n" % \
-                                   new_bname
+                        summary += "  * Branch %s created and checked out\n" \
+                            % new_bname
 
         print("\n\nSummary:")
         print(summary)
