@@ -857,8 +857,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
     def push_diff_to_staging(self, diff, commit):
         if not self.staging_url:
-            print("    * %sNo staging repo set, not pushing diff%s" % (
-                Colors.FAIL, diff.diff, Colors.ENDC))
+            print("    * %sNo staging repo set, not pushing diff %s%s" % (
+                Colors.FAIL, diff.diffid, Colors.ENDC))
             return
 
         print("    * Pushing diff %d on the staging repo... " %
