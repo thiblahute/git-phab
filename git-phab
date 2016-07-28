@@ -835,6 +835,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         for diff in diffs:
             changes.append(self.get_changes_for_diff(diff))
 
+        print("Attaching commit %s... " % commit.hexsha, end="")
         diff = self.phabricator.differential.creatediff(
             changes=changes,
             sourceMachine=socket.gethostname(),
@@ -850,6 +851,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             repositoryUUID="",
             branch=self.branch_name,
             repositoryPHID=self.phab_repo["phid"])
+        print("%s OK%s" % (Colors.OKGREEN, Colors.ENDC))
 
         return diff
 
@@ -925,7 +927,6 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         diff = self.create_diff(commit, linter_status)
         phab = self.phabricator
-        print("attach " + commit.hexsha)
         subject, body, fields, updates = self.parse_commit_msg(commit.message)
 
         try:
