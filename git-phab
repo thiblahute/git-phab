@@ -1267,7 +1267,6 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         assert(len(reply) == 1)
 
         response = reply[d]
-        assert(response['sourceControlSystem'] == "git")
 
         return response
 
@@ -1291,7 +1290,9 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         f = os.fdopen(handle, "w")
 
         commit_hash = None
-        local_commits = diff["properties"]["local:commits"]
+        local_commits = {}
+        if isinstance(diff["properties"], dict):
+            local_commits = diff["properties"]["local:commits"]
         try:
             keys = [k for k in local_commits.keys()]
         except TypeError:
@@ -1318,9 +1319,21 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             if commit_hash:
                 f.write("From: %s Mon Sep 17 00:00:00 2001\n" % commit_hash)
 
-        f.write("From: {} <{}>\n".format(
-            diff['authorName'],
-            diff['authorEmail']))
+        authorname = diff.get("authorName")
+        email = diff.get("authorEmail")
+        if not authorname:
+            # getting author name from phabricator itself
+            authorname = self.phabricator.user.query(
+                phids=[revision['authorPHID']])[0]["realName"]
+
+            author = self.format_user(authorname)
+            if not author:
+                self.die("%sNo author email for %s%s"
+                         % (Colors.FAIL, authorname, Colors.ENDC))
+        else:
+            author = "%s <%s>" % (authorname, email)
+
+        f.write("From: %s\n" % author)
         f.write("Date: {} +0000\n".format(date))
         f.write("Subject: {}\n\n".format(revision['title']))
 
