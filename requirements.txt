@@ -1,0 +1,5 @@
+appdirs
+argcomplete
+GitPython>=2.0.0 # Do not forget to update git-phab::check_dependencies_versions
+phabricator
+pre-commit

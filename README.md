@@ -2,9 +2,7 @@ INSTALL
 =======
 
 ```
-    $ pip3 install git-phab
-    $ pip3 install --upgrade git-phab
-    $ pip3 uninstall git-phab
+    $ pip3 install -r requirements.txt
 ```
 
 Optionaly generate and copy or symlink manpage into your $MANPATH
@@ -35,10 +33,7 @@ And add this in your ~/.bash_completion:
 REQUIREMENTS
 ============
 
- - pip3 install GitPython
- - pip3 install appdirs
- - pip3 install argcomplete
- - pip3 install phabricator
+See requirements.txt
 
 DESCRIPTION
 ===========
