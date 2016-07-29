@@ -613,11 +613,13 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 continue
 
             if self.line_in_headers(line, git_headers):
-                git_fields.append(line)
+                if line not in git_fields:
+                    git_fields.append(line)
                 continue
 
             if self.line_in_headers(line, phab_headers):
-                phab_fields.append(line)
+                if line not in phab_fields:
+                    phab_fields.append(line)
                 continue
 
             if line == '---':
@@ -1686,7 +1688,9 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 for r in reviewers:
                     # Note that we prepend here to make sur phab fields
                     # stay last.
-                    fields.insert(0, "Reviewed-by: " + r)
+                    field = "Reviewed-by: " + r
+                    if field not in fields:
+                        fields.insert(0, field)
 
                 msg = self.format_commit_msg(subject, body, fields, True)
                 self.repo.git.commit(amend=True, message=msg)
