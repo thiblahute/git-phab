@@ -1356,7 +1356,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         # Checkout base commit to apply patch on
         try:
             self.repo.head.reference = self.repo.commit(base_commit)
-        except gitdb.exc.BadObject:
+        except (gitdb.exc.BadObject, ValueError):
             self.die("%sCould not apply patch %s from %s (even on base commit"
                      " %s), aborting%s" % (
                          Colors.FAIL, filename, self.differential, base_commit,
