@@ -1680,7 +1680,17 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 def DisabledCompleter(prefix, **kwargs):
     return []
 
+
+def check_dependencies_versions():
+    required_pygit_version = '2.0'
+    if git.__version__ < required_pygit_version:
+        print("%sPythonGit >= %s required %s found%s"
+              % (Colors.FAIL, required_pygit_version,
+                 git.__version__, Colors.ENDC))
+        exit(1)
+
 if __name__ == '__main__':
+    check_dependencies_versions()
     parser = argparse.ArgumentParser(description='Phabricator integration.')
     subparsers = parser.add_subparsers(dest='subparser_name')
     subparsers.required = True
