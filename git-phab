@@ -1504,12 +1504,14 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         if not self.fetch_staging_commits(diff):
             return None, None
 
-        return self.repo.rev_parse("FETCH_HEAD"), self.differential
+        return (self.repo.rev_parse("FETCH_HEAD"),
+                self.differential + '-' + revision['branch'])
 
     def do_checkout(self):
         if not self.differential and not self.task:
             self.die("No task or revision provided. Aborting.")
 
+        pq = None
         if self.differential:
             commit, remote_branch_name = self.fetch_from_revision()
             if commit:
