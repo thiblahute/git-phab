@@ -1422,6 +1422,9 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         print("Checking revision:", self.differential)
         did = self.differential.strip("D")
 
+        if not did.isdigit():
+            self.die("Invalid diff ID ‘{}’".format(self.differential))
+
         revision, diff = self.get_revision_and_diff(diff=did)
 
         if self.fetch_staging_commits(diff):
