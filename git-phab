@@ -567,7 +567,6 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             assert(len(reply) == 1)
             self.phab_repo = reply[0]
         else:
-
             for phab_repo in self.phabricator.repository.query():
                 if self.phab_repo:
                     break
@@ -579,7 +578,9 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         if not self.phab_repo:
             self.die("Could not determine Phabricator repository\n"
-                     "You should set 'repository.callsign' in '.arcconfig'")
+                     "You should check your git remote URIs match those "
+                     "in Phabricator, or set 'repository.callsign' in "
+                     "'.arcconfig'")
 
         if self.phab_repo.get("staging"):
             self.staging_url = self.phab_repo.get("staging").get("uri")
