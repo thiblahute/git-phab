@@ -1487,9 +1487,12 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         reply = self.phabricator.maniphest.query(ids=[int(self.task[1:])])
 
-        props = list(reply.values())[0]
-        uri = props['auxiliary']['std:maniphest:git:uri-branch']
-        remote, branch = uri.split('#')
+        try:
+            props = list(reply.values())[0]
+            uri = props['auxiliary']['std:maniphest:git:uri-branch']
+            remote, branch = uri.split('#')
+        except:
+            self.die("Git URI is not set on task; cannot fetch it.")
 
         print("Git URI: %s, branch: %s" % (remote, branch))
         self.repo.git.fetch(remote, "%s" % branch)
