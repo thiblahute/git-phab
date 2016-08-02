@@ -30,5 +30,5 @@ setup(
 
 try:
     subprocess.check_call(["pre-commit", "install"])
-except subprocess.CalledProcessError:
+except (FileNotFoundError, subprocess.CalledProcessError):
     print("Could not install `pre-commit` hook")
