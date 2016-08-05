@@ -108,7 +108,7 @@ class GitPhab:
             # FIXME, workaround
             # https://github.com/disqus/python-phabricator/issues/37
             self.phabricator.differential.creatediff.api.interface[
-                "differential"]["creatediff"]["required"]["changes"] = [dict]
+                "differential"]["creatediff"]["required"]["changes"] = dict
         except phabricator.ConfigurationError:
             needs_credential = True
 
@@ -778,12 +778,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
             properties["unix:filemode"] = m
 
-        is_text = diff.b_blob.mime_type.startswith(
-            "text/") if diff.b_blob else True
-        if is_text:
-            file_length = file_len(os.path.join(
-                self.repo.working_dir, diff.b_path))
-
+        change_filename = None
         _type = 0
         oldpath = diff.a_path
         patch_lines = str(diff.diff.decode("utf-8")).split("\n")
@@ -791,11 +786,14 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         old_properties = {}
         new_properties = {}
 
+        change_filename = diff.b_path
         if diff.new_file:
             _type = 1
             oldpath = None
         elif diff.deleted_file:
             _type = 3
+            change_filename = diff.a_path
+            currentpath = diff.a_path
         elif diff.renamed:
             _type = 6
 
@@ -809,13 +807,26 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             elif l.startswith("-"):
                 removed_lines += 1
 
+        is_text = diff.b_blob.mime_type.startswith(
+            "text/") if diff.b_blob else True
         if is_text:
+            if diff.deleted_file:
+                file_length = 0
+                old_length = len([l for l in patch_lines if
+                                  l.startswith('-')])
+            else:
+                file_length = file_len(os.path.join(
+                    self.repo.working_dir, diff.b_path))
+                old_length = max(0, file_length - added_lines + removed_lines)
+
             metadata = {"line:first": 0}
             hunks = [{
-                "oldOffset": "0" if diff.new_file else "1",
-                "newOffset": "1" if diff.deleted_file else "0",
-                "oldLength": max(0, file_length - added_lines + removed_lines),
+                "newOffset": "0" if diff.new_file else "1",
+                "oldOffset": "1" if diff.deleted_file else "0",
+                "oldLength": old_length,
                 "newLength": file_length,
+                "addLines": added_lines,
+                "delLines": removed_lines,
                 "corpus": "\n".join(patch_lines[1:])
             }]
             filetype = "1"
@@ -833,17 +844,15 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 "new:binary-phid": phab_file.response
             }
 
-        return {"metadata": metadata,
-                "oldProperties": old_properties,
-                "newProperties": new_properties,
-                "oldPath": oldpath,
-                "currentPath": currentpath,
-                "addLines": added_lines,
-                "delLines": removed_lines,
-                "type": _type,
-                "fileType": filetype,
-                "hunks": hunks
-                }
+        return change_filename, {"metadata": metadata,
+                                 "oldProperties": old_properties,
+                                 "newProperties": new_properties,
+                                 "oldPath": oldpath,
+                                 "currentPath": currentpath,
+                                 "type": _type,
+                                 "fileType": filetype,
+                                 "hunks": hunks
+                                 }
 
     def get_git_diffs(self, commit):
         if commit.parents:
@@ -857,14 +866,15 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         return diffs
 
     def create_diff(self, commit, linter_status):
-        changes = []
+        changes = {}
         parent_commit = ""
         diffs = self.get_git_diffs(commit)
         if commit.parents:
             parent_commit = self.repo.head.object.parents[0].hexsha
 
         for diff in diffs:
-            changes.append(self.get_changes_for_diff(diff))
+            changed_file, change = self.get_changes_for_diff(diff)
+            changes[changed_file] = change
 
         print("    * Pushing new diff... ", end='')
         diff = self.phabricator.differential.creatediff(
