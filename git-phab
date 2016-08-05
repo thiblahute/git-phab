@@ -774,7 +774,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 # Special case for submodules!
                 m = 160000
             else:
-                m = oct(mode)
+                m = str(oct(mode))[2:]
 
             properties["unix:filemode"] = m
 
