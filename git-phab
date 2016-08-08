@@ -677,7 +677,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
     def format_commit_msg(self, subject, body, git_fields, phab_fields,
                           ask=False):
         subject = subject.strip()
-        body = '\n'.join(body).strip()
+        body = '\n'.join(body).strip('\r\n')
         fields = '\n'.join(git_fields + phab_fields).strip()
 
         subject = self.format_field(subject, ask)
@@ -989,7 +989,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         phab_fields.append("Projects: %s" % ','.join(self.project_phids))
 
-        summary = ('\n'.join(body) + '\n' + '\n'.join(git_fields)).strip()
+        summary = ('\n'.join(body) + '\n' + '\n'.join(git_fields)).strip('\r\n')
 
         revision_id = self.get_differential_id(self.repo.head.commit)
         if revision_id:
