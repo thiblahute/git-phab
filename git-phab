@@ -840,8 +840,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
             metadata = {"line:first": 0}
             hunks = [{
-                "newOffset": "0" if diff.new_file else "1",
-                "oldOffset": "1" if diff.deleted_file else "0",
+                "newOffset": "0" if diff.deleted_file else "1",
+                "oldOffset": "0" if diff.new_file else "1",
                 "oldLength": old_length,
                 "newLength": file_length,
                 "addLines": added_lines,
