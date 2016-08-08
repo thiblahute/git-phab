@@ -649,8 +649,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         """
         return msg.split('\n---\n', 1)[0]
 
-    def format_commit_msg(self, subject, body, git_fields, phab_fields,
-                          ask=False):
+    def format_field(self, field, ask=False):
         # This is the list of fields phabricator will search by default in
         # commit message, case insensitive. It will confuse phabricator's
         # parser if they appear in the subject or body of the commit message.
@@ -662,22 +661,27 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                      'differential revision:', 'conflicts:', 'git-svn-id:',
                      'auditors:']
 
+        for header in blacklist:
+            header_ = header[:-1] + '_:'
+            f = re.sub(re.escape(header), header_, field, flags=re.I)
+            if (f != field) and (
+                not ask or self.prompt(
+                    "Commit message contains '%s'.\n"
+                    "It could confuse Phabricator's parser.\n"
+                    "Do you want to suffix it with an underscore?" %
+                    header)):
+                field = f
+
+        return field
+
+    def format_commit_msg(self, subject, body, git_fields, phab_fields,
+                          ask=False):
         subject = subject.strip()
         body = '\n'.join(body).strip()
         fields = '\n'.join(git_fields + phab_fields).strip()
 
-        for header in blacklist:
-            header_ = header[:-1] + '_:'
-            s = re.sub(re.escape(header), header_, subject, flags=re.I)
-            b = re.sub(re.escape(header), header_, body, flags=re.I)
-            if (s != subject or b != body) and (
-                not ask or self.prompt(
-                    "Commit message contains '%s'.\n"
-                    "It could confuse phabricator's parser.\n"
-                    "Do you want to prefix is with an underscore?" %
-                    header)):
-                subject = s
-                body = b
+        subject = self.format_field(subject, ask)
+        body = self.format_field(body, ask)
 
         return '\n\n'.join([subject, body, fields])
 
@@ -998,11 +1002,11 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
             arc_message = arc_message.replace(
                 "<<Replace this line with your Revision Title>>",
-                subject)
+                self.format_field(subject, True))
             if summary != '':
                 arc_message = arc_message.replace(
                     "Summary: ",
-                    "Summary:\n" + summary)
+                    "Summary:\n" + self.format_field(summary, True))
 
             if self.reviewers:
                 arc_message = arc_message.replace(
