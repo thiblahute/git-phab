@@ -663,7 +663,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         for header in blacklist:
             header_ = header[:-1] + '_:'
-            f = re.sub(re.escape(header), header_, field, flags=re.I)
+            f = re.sub('^' + re.escape(header), header_, field, flags=re.I)
             if (f != field) and (
                 not ask or self.prompt(
                     "Commit message contains '%s'.\n"
