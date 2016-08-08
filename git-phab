@@ -761,6 +761,19 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         return subprocess.check_output(command).decode("utf-8")
 
+    def blob_is_binary(self, blob):
+        if not blob:
+            return False
+
+        bytes = blob.data_stream[-1].read()
+        # The mime_type field of a gitpython blob is based only on its filename
+        # which means that files like 'configure.ac' will return weird MIME
+        # types, unsuitable for working out whether they are text. Instead,
+        # check whether any of the bytes in the blob are non-ASCII.
+        textchars = bytearray({7, 8, 9, 10, 12, 13, 27} |
+                              set(range(0x20, 0x100)) - {0x7f})
+        return bool(bytes.translate(None, textchars))
+
     def get_changes_for_diff(self, diff):
         def file_len(fname):
             i = 0
@@ -813,8 +826,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             elif l.startswith("-"):
                 removed_lines += 1
 
-        is_text = diff.b_blob.mime_type.startswith(
-            "text/") if diff.b_blob else True
+        is_text = (not self.blob_is_binary(diff.a_blob) and
+                   not self.blob_is_binary(diff.b_blob))
         if is_text:
             if diff.deleted_file:
                 file_length = 0
@@ -936,8 +949,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         diffs = self.get_git_diffs(commit)
         has_binary = False
         for d in diffs:
-            if d.b_blob and not d.b_blob.mime_type.startswith(
-                    "text/"):
+            if d.b_blob and \
+               self.blob_is_binary(d.b_blob):
                 has_binary = True
                 break
 
@@ -989,7 +1002,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         phab_fields.append("Projects: %s" % ','.join(self.project_phids))
 
-        summary = ('\n'.join(body) + '\n' + '\n'.join(git_fields)).strip('\r\n')
+        summary = ('\n'.join(body) + '\n' +
+                   '\n'.join(git_fields)).strip('\r\n')
 
         revision_id = self.get_differential_id(self.repo.head.commit)
         if revision_id:
@@ -1718,7 +1732,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                         git_fields.append(field)
 
                 msg = self.format_commit_msg(subject, body, git_fields,
-                    phab_fields, True)
+                                             phab_fields, True)
                 self.repo.git.commit(amend=True, message=msg)
 
             orig_branch.commit = self.repo.head.commit
