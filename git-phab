@@ -747,7 +747,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
     def run_linter(self):
         if not os.path.exists(".pre-commit-config.yaml"):
             if os.path.exists(".arclint"):
-                return subprocess.check_output("arc lint",
+                return subprocess.check_output("arc lint --never-apply-patches",
                                                shell=True).decode("utf-8")
             else:
                 return None
@@ -969,7 +969,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         print("    * Running linters...", end="")
         linter_status = "none"
         try:
-            self.run_linter()
+            print(self.run_linter())
             print("%s OK%s" % (Colors.OKGREEN, Colors.ENDC))
             linter_status = "okay"
         except BaseException as e:
