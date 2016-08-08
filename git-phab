@@ -567,7 +567,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
             assert(len(reply) == 1)
             self.phab_repo = reply[0]
         else:
-            for phab_repo in self.phabricator.repository.query():
+            for phab_repo in self.phabricator.repository.query(limit=10000):
                 if self.phab_repo:
                     break
 
