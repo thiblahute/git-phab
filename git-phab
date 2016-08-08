@@ -629,7 +629,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
             body.append(line)
 
-        return subject, body, git_fields + phab_fields, updates
+        return subject, body, git_fields, phab_fields, updates
 
     def strip_updates(self, msg):
         """
@@ -649,7 +649,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         """
         return msg.split('\n---\n', 1)[0]
 
-    def format_commit_msg(self, subject, body, fields, ask=False):
+    def format_commit_msg(self, subject, body, git_fields, phab_fields,
+                          ask=False):
         # This is the list of fields phabricator will search by default in
         # commit message, case insensitive. It will confuse phabricator's
         # parser if they appear in the subject or body of the commit message.
@@ -663,7 +664,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         subject = subject.strip()
         body = '\n'.join(body).strip()
-        fields = '\n'.join(fields).strip()
+        fields = '\n'.join(git_fields + phab_fields).strip()
 
         for header in blacklist:
             header_ = header[:-1] + '_:'
@@ -970,7 +971,8 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
 
         diff = self.create_diff(commit, linter_status)
         phab = self.phabricator
-        subject, body, fields, updates = self.parse_commit_msg(commit.message)
+        subject, body, git_fields, phab_fields, updates = \
+            self.parse_commit_msg(commit.message)
 
         try:
             last_revision_id = self.get_differential_id(
@@ -981,24 +983,26 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
         if last_revision_id:
             body.append("Depends on D%s" % last_revision_id)
 
-        fields.append("Projects: %s" % ','.join(self.project_phids))
+        phab_fields.append("Projects: %s" % ','.join(self.project_phids))
+
+        summary = ('\n'.join(body) + '\n' + '\n'.join(git_fields)).strip()
 
         revision_id = self.get_differential_id(self.repo.head.commit)
         if revision_id:
             arc_message = phab.differential.getcommitmessage(
                 revision_id=revision_id, edit="update",
-                fields=fields).response
+                fields=phab_fields).response
         else:
             arc_message = phab.differential.getcommitmessage(
-                edit="create", fields=fields).response
+                edit="create", fields=phab_fields).response
 
             arc_message = arc_message.replace(
                 "<<Replace this line with your Revision Title>>",
                 subject)
-            if body:
+            if summary != '':
                 arc_message = arc_message.replace(
                     "Summary: ",
-                    "Summary:\n" + '\n'.join(body))
+                    "Summary:\n" + summary)
 
             if self.reviewers:
                 arc_message = arc_message.replace(
@@ -1043,7 +1047,7 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                     subject)
                 message = "\n".join(message)
 
-            fields["summary"] = '\n'.join(body)
+            fields["summary"] = summary
             fields["title"] = subject
             if linter_message:
                 message += "\n\n%s" % linter_message
@@ -1701,17 +1705,16 @@ Paste API Token from that page and press <enter>: """ % self.phabricator_uri)
                 # - Ensure body doesn't contain blacklisted words
                 # - Ensure phabricator fields are last to make its parser happy
                 # - Discard updates/discussion of previous patch revisions
-                subject, body, fields, updates = self.parse_commit_msg(
-                    self.repo.head.commit.message)
+                subject, body, git_fields, phab_fields, updates = \
+                    self.parse_commit_msg(self.repo.head.commit.message)
 
                 for r in reviewers:
-                    # Note that we prepend here to make sur phab fields
-                    # stay last.
                     field = "Reviewed-by: " + r
-                    if field not in fields:
-                        fields.insert(0, field)
+                    if field not in git_fields:
+                        git_fields.append(field)
 
-                msg = self.format_commit_msg(subject, body, fields, True)
+                msg = self.format_commit_msg(subject, body, git_fields,
+                    phab_fields, True)
                 self.repo.git.commit(amend=True, message=msg)
 
             orig_branch.commit = self.repo.head.commit
