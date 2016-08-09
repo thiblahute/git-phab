@@ -3,6 +3,6 @@
     "lint.engine": "ArcanistConfigurationDrivenLintEngine",
     "project": "git-phab",
     "repository.callsign": "GITPHAB",
-    "default-reviewers": "xclaesse"
+    "default-reviewers": "xclaesse,thiblahute"
 }
 
